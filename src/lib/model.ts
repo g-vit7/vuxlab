@@ -1,0 +1,207 @@
+import { z } from "zod";
+export type Role = "public" | "teacher" | "admin";
+export const roles: Record<Role, string> = {
+  public: "Público",
+  teacher: "Docente",
+  admin: "Administrador",
+};
+export const attributeSchema = z
+  .object({
+    id: z.string(),
+    name: z.string().trim().min(1).max(100),
+    type: z.enum(["text", "number", "boolean", "list"]),
+    value: z.json(),
+    visibility: z.enum(["public", "teacher", "admin"]),
+    edit_role: z.enum(["teacher", "admin"]),
+  })
+  .superRefine((a, ctx) => {
+    if (
+      (a.type === "text" && typeof a.value !== "string") ||
+      (a.type === "number" && typeof a.value !== "number") ||
+      (a.type === "boolean" && typeof a.value !== "boolean") ||
+      (a.type === "list" && !Array.isArray(a.value))
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Valor incompatível com o tipo",
+      });
+  });
+export const objectSchema = z.object({
+  id: z.string(),
+  kind: z.enum(["master", "pc", "door", "other"]),
+  icon: z.string().max(80),
+  x: z.number().int().positive(),
+  y: z.number().int().positive(),
+  color: z.enum(["gray", "green"]),
+  attributes: z.array(attributeSchema).max(100),
+});
+export const roomSchema = z
+  .object({
+    name: z.string().trim().min(1).max(100),
+    width: z.number().int().min(1).max(100),
+    height: z.number().int().min(1).max(100),
+    objects: z.array(objectSchema).max(2000),
+  })
+  .superRefine((r, ctx) => {
+    const cells = new Set<string>();
+    for (const o of r.objects) {
+      const k = `${o.x},${o.y}`;
+      if (o.x > r.width || o.y > r.height || cells.has(k))
+        ctx.addIssue({
+          code: "custom",
+          message: "Coordenadas fora da sala ou sobrepostas",
+        });
+      cells.add(k);
+    }
+    if (new Set(r.objects.map((o) => o.id)).size !== r.objects.length)
+      ctx.addIssue({ code: "custom", message: "Identificadores duplicados" });
+    const ids = r.objects.flatMap((o) => o.attributes.map((a) => a.id));
+    if (new Set(ids).size !== ids.length)
+      ctx.addIssue({ code: "custom", message: "Atributos duplicados" });
+  });
+export type Attribute = z.infer<typeof attributeSchema>;
+export type LabObject = z.infer<typeof objectSchema>;
+export type Room = z.infer<typeof roomSchema> & {
+  id: string;
+  workspace_id: string;
+  owner_id: string;
+  version: number;
+};
+export type Workspace = { id: string; name: string; role: Role };
+export type Note = {
+  id: string;
+  workspace_id: string;
+  room_id: string | null;
+  object_id: string | null;
+  author_id: string;
+  body: string;
+};
+export type History = {
+  id: string;
+  workspace_id: string;
+  room_id: string;
+  actor_id: string;
+  created_at: string;
+  label: string;
+  before: Room | null;
+  after: Room | null;
+  result_version: number;
+};
+export type Member = {
+  user_id: string;
+  role: Role;
+  email?: string;
+  display_name?: string;
+};
+export function freshObject(
+  kind: LabObject["kind"],
+  x: number,
+  y: number,
+): LabObject {
+  const attr = (
+    name: string,
+    type: Attribute["type"],
+    value: Attribute["value"],
+    visibility: Attribute["visibility"],
+    edit_role: Attribute["edit_role"],
+  ): Attribute => ({
+    id: crypto.randomUUID(),
+    name,
+    type,
+    value,
+    visibility,
+    edit_role,
+  });
+  return {
+    id: crypto.randomUUID(),
+    kind,
+    icon:
+      kind === "door" ? "DoorOpen" : kind === "other" ? "Settings" : "Monitor",
+    x,
+    y,
+    color: "gray",
+    attributes: [
+      attr(
+        "Identificador",
+        "text",
+        kind === "pc"
+          ? "PC"
+          : kind === "master"
+            ? "PC mestre"
+            : kind === "door"
+              ? "Porta"
+              : "Objeto",
+        "public",
+        "teacher",
+      ),
+      ...(kind === "pc" || kind === "master"
+        ? [
+            attr("IP", "text", "", "teacher", "admin"),
+            attr("Utilizadores", "list", [], "teacher", "teacher"),
+          ]
+        : []),
+      attr("Notas compartilhadas", "list", [], "teacher", "teacher"),
+    ],
+  };
+}
+export function resizeRoom(
+  r: Room,
+  width: number,
+  height: number,
+  anchor: string,
+) {
+  const dx = anchor.includes("right") ? width - r.width : 0,
+    dy = anchor.includes("bottom") ? height - r.height : 0;
+  const moved = r.objects.map((o) => ({ ...o, x: o.x + dx, y: o.y + dy }));
+  return {
+    room: {
+      ...r,
+      width,
+      height,
+      objects: moved.filter(
+        (o) => o.x >= 1 && o.y >= 1 && o.x <= width && o.y <= height,
+      ),
+    },
+    removed: moved.filter(
+      (o) => o.x < 1 || o.y < 1 || o.x > width || o.y > height,
+    ),
+  };
+}
+export function canManageRoom(role: Role, r: Room, user: string) {
+  return role === "admin" || (role === "teacher" && r.owner_id === user);
+}
+export function canEditAttribute(
+  role: Role,
+  r: Room,
+  user: string,
+  a: Attribute,
+) {
+  return (
+    canManageRoom(role, r, user) ||
+    (role === "teacher" && a.edit_role === "teacher")
+  );
+}
+export function importRoom(
+  input: unknown,
+  workspace_id: string,
+  owner_id: string,
+): Room {
+  const r = roomSchema.parse(input);
+  return {
+    ...r,
+    id: crypto.randomUUID(),
+    workspace_id,
+    owner_id,
+    version: 0,
+    objects: r.objects.map((o) => ({
+      ...o,
+      id: crypto.randomUUID(),
+      attributes: o.attributes.map((a) => ({ ...a, id: crypto.randomUUID() })),
+    })),
+  };
+}
+export function identifier(o: LabObject) {
+  return String(
+    o.attributes.find((a) => a.name === "Identificador")?.value || o.kind,
+  );
+}
