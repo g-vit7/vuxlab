@@ -626,7 +626,7 @@ export default function Editor({
   }
   return (
     <main
-      className={`editor-page ${fullscreen ? "editor-fullscreen" : ""} ${landscape ? "editor-landscape" : ""} ${fullscreen || landscape ? "editor-floating" : ""} ${object || panel === "notes" || panel === "room" ? "has-properties" : ""}`}
+      className={`editor-page ${fullscreen ? "editor-fullscreen" : ""} ${landscape ? "editor-landscape" : ""} ${object || panel === "notes" || panel === "room" ? "has-properties" : ""}`}
     >
       <div className="editor-heading" role="region" aria-label="Ações da sala">
         <div className="room-heading-title">
