@@ -137,6 +137,7 @@ export default function App() {
   function leaveNavigation(next: EventTarget | null) {
     if (
       freeSidebar &&
+      window.matchMedia("(hover: hover)").matches &&
       !(next instanceof Node && navigation.current?.contains(next))
     ) {
       if (navigation.current?.querySelector(":hover")) return;
@@ -182,6 +183,7 @@ export default function App() {
       <Button
         size="icon"
         variant="ghost"
+        className="sidebar-mode-toggle"
         aria-pressed={freeSidebar}
         title={freeSidebar ? "Modo Livre" : "Modo Travado"}
         aria-label={
@@ -276,7 +278,11 @@ export default function App() {
             className="sidebar-edge"
             aria-hidden="true"
             onPointerEnter={(event) => {
-              if (event.pointerType === "mouse") setSidebar(true);
+              if (
+                event.pointerType === "mouse" &&
+                matchMedia("(hover: hover)").matches
+              )
+                setSidebar(true);
             }}
           />
         )}

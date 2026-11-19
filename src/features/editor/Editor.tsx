@@ -64,6 +64,8 @@ import {
 } from "../../lib/model";
 import type { Api } from "../../lib/api";
 import { toView, fromView } from "./view";
+const landscapeQuery =
+  "(orientation: landscape) and (max-height: 560px) and (hover: none)";
 const icons: Record<string, typeof Monitor> = {
   Monitor,
   DoorOpen,
@@ -141,6 +143,15 @@ export default function Editor({
   const [turn, setTurn] = useState(0);
   const [viewReady, setViewReady] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const [landscape, setLandscape] = useState(
+    () => matchMedia(landscapeQuery).matches,
+  );
+  useEffect(() => {
+    const query = matchMedia(landscapeQuery);
+    const sync = () => setLandscape(query.matches);
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
   const [pan, setPan] = useState(false);
   const [panning, setPanning] = useState(false);
   const [size, setSize] = useState<{ width: number; height: number }>();
@@ -615,7 +626,7 @@ export default function Editor({
   }
   return (
     <main
-      className={`editor-page ${fullscreen ? "editor-fullscreen" : ""} ${object || panel === "notes" || panel === "room" ? "has-properties" : ""}`}
+      className={`editor-page ${fullscreen ? "editor-fullscreen" : ""} ${landscape ? "editor-landscape" : ""} ${fullscreen || landscape ? "editor-floating" : ""} ${object || panel === "notes" || panel === "room" ? "has-properties" : ""}`}
     >
       <div className="editor-heading" role="region" aria-label="Ações da sala">
         <div className="room-heading-title">
@@ -637,7 +648,7 @@ export default function Editor({
             )}
           </div>
         </div>
-        <div className="row wrap">
+        <div className="row wrap room-heading-actions">
           <span className={`save-indicator ${saveState}`} role="status">
             {saveState === "saving" ? (
               <LoaderCircle size={14} className="spin" />
@@ -646,14 +657,16 @@ export default function Editor({
             ) : (
               <Check size={14} />
             )}
-            {
+            <span className={landscape ? "sr-only" : undefined}>
               {
-                saved: "Tudo salvo",
-                saving: "Salvando…",
-                pending: "Alterações pendentes",
-                error: "Erro ao salvar",
-              }[saveState]
-            }
+                {
+                  saved: "Tudo salvo",
+                  saving: "Salvando…",
+                  pending: "Alterações pendentes",
+                  error: "Erro ao salvar",
+                }[saveState]
+              }
+            </span>
           </span>
           <Button
             size="sm"
@@ -678,6 +691,7 @@ export default function Editor({
           {appearanceShortcut}
           <Button
             size="sm"
+            aria-label="Salvar"
             onClick={() => void flush()}
             disabled={
               saveState === "saved" ||
@@ -686,7 +700,7 @@ export default function Editor({
             }
           >
             <Save size={15} />
-            Salvar
+            <span className="save-button-label">Salvar</span>
           </Button>
         </div>
       </div>
@@ -781,6 +795,7 @@ export default function Editor({
                 <Button
                   size="sm"
                   variant="ghost"
+                  aria-label="Dimensões da sala"
                   onClick={() => setResize(true)}
                 >
                   <Maximize size={16} />
@@ -1045,7 +1060,7 @@ export default function Editor({
                 Cancelar movimento
               </Button>
             )}
-            <span className="row tiny muted">
+            <span className="row tiny muted canvas-hint">
               <Info size={14} />
               {move
                 ? "Escolha uma célula vazia como destino"

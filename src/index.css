@@ -2403,23 +2403,23 @@ textarea {
   width: 100%;
   background: var(--bg);
 }
-.editor-fullscreen .editor-layout {
+.editor-floating .editor-layout {
   grid-template: auto minmax(0, 1fr) auto / minmax(0, 1fr);
 }
-.editor-fullscreen .canvas-section {
+.editor-floating .canvas-section {
   display: contents;
 }
-.editor-fullscreen .editor-toolbar {
+.editor-floating .editor-toolbar {
   grid-area: 1 / 1;
 }
-.editor-fullscreen .canvas-scroll,
-.editor-fullscreen .properties {
+.editor-floating .canvas-scroll,
+.editor-floating .properties {
   grid-area: 2 / 1;
 }
-.editor-fullscreen .canvas-footer {
+.editor-floating .canvas-footer {
   grid-area: 3 / 1;
 }
-.editor-fullscreen .properties {
+.editor-floating .properties {
   position: relative;
   inset: auto;
   justify-self: end;
@@ -2632,7 +2632,7 @@ textarea {
   .editor-heading .save-indicator {
     display: none;
   }
-  .editor-fullscreen .properties {
+  .editor-fullscreen:not(.editor-landscape) .properties {
     align-self: end;
     max-height: min(calc(100% - 16px), 65dvh, 550px);
   }
@@ -2778,4 +2778,99 @@ textarea {
 }
 :root[data-theme]:not([data-theme="default"]) .btn-primary:hover {
   background: color-mix(in srgb, var(--blue) 88%, var(--text));
+}
+
+@media (hover: none) {
+  .nav-controls .sidebar-mode-toggle,
+  .sidebar-edge {
+    display: none;
+  }
+}
+
+/* In short landscape windows, keep the map between three compact bars. */
+.shell:has(.editor-landscape).sidebar-expanded .main-shell {
+  margin-left: 0;
+}
+.shell:has(.editor-landscape).sidebar-expanded .sidebar-backdrop {
+  display: block;
+}
+.shell:has(.editor-fullscreen).sidebar-expanded .sidebar-backdrop {
+  display: none;
+}
+.editor-page.editor-landscape .editor-heading {
+  min-height: 40px;
+  padding: 2px 6px;
+  flex-wrap: nowrap;
+  align-items: center;
+}
+.editor-landscape .room-heading-title .btn {
+  min-height: 36px;
+  width: 32px;
+}
+.editor-landscape .room-heading-actions {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  max-width: none;
+  gap: 4px;
+}
+.editor-landscape .room-heading-actions .btn {
+  min-width: 34px;
+  min-height: 36px;
+  padding: 4px;
+}
+.editor-landscape .room-heading-actions .save-indicator {
+  display: flex;
+  width: auto;
+  margin-inline: 0 3px;
+}
+.editor-landscape
+  :is(.hide-small, .save-button-label, .appearance-label, .canvas-hint) {
+  display: none;
+}
+.editor-landscape .editor-toolbar {
+  height: 40px;
+  padding: 0 6px;
+}
+.editor-landscape .editor-toolbar :is(.tools, .row) {
+  gap: 2px;
+}
+.editor-landscape .canvas-footer {
+  min-height: 40px;
+  justify-content: flex-end;
+  padding: 2px 6px;
+}
+.editor-landscape .canvas-footer > .btn {
+  margin-inline-end: auto;
+}
+.editor-landscape .zoom-tools {
+  gap: 2px;
+}
+.editor-landscape .zoom-tools button {
+  min-width: 29px;
+  min-height: 34px;
+}
+.editor-landscape .properties {
+  margin: 4px 8px;
+  width: min(266px, 57%);
+}
+.editor-landscape .properties-top {
+  padding: 2px 8px;
+}
+.editor-landscape .shared-notes-action {
+  margin: 0 8px 3px;
+  min-height: 30px;
+  padding: 3px 6px;
+}
+.editor-landscape .tabs {
+  padding: 0 8px;
+  gap: 12px;
+}
+.editor-landscape .tabs button {
+  padding-block: 5px;
+}
+.editor-landscape .properties-actions {
+  padding: 4px 6px;
+}
+.editor-landscape .properties-actions .btn {
+  min-height: 32px;
 }
