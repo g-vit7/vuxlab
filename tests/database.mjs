@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 const db = new PGlite();
 let count = 0;
 await db.exec(
-  `create role anon;create role authenticated;create schema auth;create table auth.users(id uuid primary key,email text);create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;grant usage on schema auth to authenticated;grant execute on function auth.uid() to authenticated;`,
+  `create role anon;create role authenticated;create schema auth;create table auth.users(id uuid primary key,email text,raw_user_meta_data jsonb);create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;grant usage on schema auth to authenticated;grant execute on function auth.uid() to authenticated;`,
 );
 await db.exec(
   await readFile(
@@ -498,6 +498,134 @@ await test("Perfil permite alterar apenas o próprio nome e o administrador rece
     await db.query("select * from public.list_members($1)", [w])
   ).rows.find((m) => m.user_id === teacher);
   assert.equal(member.display_name, "Docente de teste");
+});
+await db.exec("reset role");
+await db.exec(
+  await readFile(
+    new URL(
+      "../supabase/migrations/202611190001_editor_preferences.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+);
+await test("Migração preserva histórico anterior e valida toda a área dos objetos", async () => {
+  await as(admin);
+  const change = (
+    await db.query(
+      "select id from public.change_history where room_id=$1 and result_version=10",
+      [room.id],
+    )
+  ).rows[0].id;
+  await rpc("undo_change", [change]);
+  const large = structuredClone(room);
+  Object.assign(large.objects[0], { width: 2, height: 3, color: "yellow" });
+  assert.equal(await rpc("save_room", [large, 11, "Área ampliada", false]), 12);
+  const conflict = structuredClone(large);
+  Object.assign(conflict.objects[1], { x: 2, y: 2 });
+  await rejects(
+    () => rpc("save_room", [conflict, 12, "Sobreposto", false]),
+    /Objetos sobrepostos/,
+  );
+  Object.assign(conflict.objects[1], { x: 4, y: 23, height: 2 });
+  await rejects(
+    () => rpc("save_room", [conflict, 12, "Fora da grade", false]),
+    /fora dos limites/,
+  );
+  assert.deepEqual(
+    (
+      await db.query(
+        "select width,height,color from public.objects where id=$1",
+        [large.objects[0].id],
+      )
+    ).rows[0],
+    { width: 2, height: 3, color: "yellow" },
+  );
+});
+await test("Orientação é pessoal e só pode ser salva por membros da sala", async () => {
+  await as(admin);
+  const invite = await rpc("create_invite", [w, "public", 1, 1]);
+  await as(pub);
+  await rpc("accept_invite", [invite]);
+  await as(teacher);
+  await db.query(
+    "insert into public.room_view_preferences(room_id,turn) values($1,3)",
+    [room.id],
+  );
+  await as(pub);
+  assert.deepEqual(
+    (await db.query("select turn from public.room_view_preferences")).rows,
+    [],
+  );
+  await db.query(
+    "insert into public.room_view_preferences(room_id,turn) values($1,1)",
+    [room.id],
+  );
+  assert.deepEqual(
+    (await db.query("select turn from public.room_view_preferences")).rows,
+    [{ turn: 1 }],
+  );
+  await as(admin);
+  await rpc("set_member", [w, pub, null]);
+  await as(pub);
+  assert.deepEqual(
+    (
+      await db.query(
+        "update public.room_view_preferences set turn=2 where room_id=$1 returning turn",
+        [room.id],
+      )
+    ).rows,
+    [],
+  );
+  await rejects(
+    () =>
+      db.query(
+        "insert into public.room_view_preferences(room_id,turn) values($1,2)",
+        [room.id],
+      ),
+    /row-level security/,
+  );
+});
+await db.exec("reset role");
+await db.exec(
+  await readFile(
+    new URL(
+      "../supabase/migrations/202611190002_signup_display_name.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+);
+await test("Cadastro cria perfil a partir de um nome válido e aceita contas sem nome", async () => {
+  const signedUp = randomUUID(),
+    blank = randomUUID(),
+    invalid = randomUUID();
+  await db.query(
+    "insert into auth.users(id,raw_user_meta_data) values($1,$2),($3,$4),($5,$6)",
+    [
+      signedUp,
+      { display_name: "  Ada  " },
+      blank,
+      { display_name: " " },
+      invalid,
+      { display_name: ["Ada"] },
+    ],
+  );
+  await as(signedUp);
+  assert.deepEqual(
+    (await db.query("select display_name from public.profiles")).rows,
+    [{ display_name: "Ada" }],
+  );
+  await as(blank);
+  assert.deepEqual(
+    (await db.query("select display_name from public.profiles")).rows,
+    [],
+  );
+  await as(invalid);
+  assert.deepEqual(
+    (await db.query("select display_name from public.profiles")).rows,
+    [],
+  );
 });
 console.log(`\n${count} cenários PostgreSQL/RLS aprovados.`);
 await db.close();

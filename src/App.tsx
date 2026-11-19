@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import {
   Link,
   Navigate,
@@ -15,8 +22,8 @@ import {
   LayoutGrid,
   Settings,
   LogOut,
-  Sun,
-  Moon,
+  Lock,
+  LockOpen,
   Users,
   ArrowLeft,
   Monitor,
@@ -27,7 +34,6 @@ import {
   ChevronRight,
   Search,
   FlaskConical,
-  Menu,
   Copy,
   Trash2,
   NotebookPen,
@@ -45,6 +51,15 @@ import {
   type Role,
   type Member,
 } from "./lib/model";
+import {
+  localAppearance,
+  saveLocalAppearance,
+  type Appearance,
+} from "./lib/appearance";
+import {
+  AppearanceFields,
+  AppearanceShortcut,
+} from "./components/AppearanceControls";
 import Editor from "./features/editor/Editor";
 import WorkspaceNotes from "./components/WorkspaceNotes";
 import PersonalNotes from "./features/notes/PersonalNotes";
@@ -52,22 +67,143 @@ export default function App() {
   const [user, setUser] = useState<{ id: string; email?: string } | null>(null),
     [loading, setLoading] = useState(!!supabase),
     [isDemo, setDemo] = useState(sessionStorage.getItem("vuxlab-demo") === "1");
-  const [dark, setDark] = useState(
-      localStorage.getItem("vuxlab-theme") === "dark",
-    ),
-    [error, setError] = useState(""),
-    [spaces, setSpaces] = useState<Workspace[]>([]),
-    [sidebar, setSidebar] = useState(false);
+  const [appearance, setAppearance] = useState(localAppearance);
+  const [appearanceBusy, setAppearanceBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [spaces, setSpaces] = useState<Workspace[]>([]);
+  const [sidebar, setSidebar] = useState(
+    () => window.innerWidth >= 1200 && window.innerHeight >= 720,
+  );
+  const [freeSidebar, setFreeSidebar] = useState(
+    () => localStorage.getItem("vuxlab-sidebar") === "free",
+  );
   const [displayName, setDisplayName] = useState("");
   const navigate = useNavigate(),
     location = useLocation();
   const service = useMemo(() => api(isDemo), [isDemo]);
   const activeId = location.pathname.split("/")[2];
   const active = spaces.find((w) => w.id === activeId);
+  const userId = isDemo ? DEMO_USER : (user?.id ?? "");
+  const inEditor = /^\/w\/[^/]+\/sala\/[^/]+/.test(location.pathname);
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", dark);
-    localStorage.setItem("vuxlab-theme", dark ? "dark" : "light");
-  }, [dark]);
+    const system = matchMedia("(prefers-color-scheme: dark)");
+    function apply() {
+      document.documentElement.dataset.theme = appearance.theme;
+      document.documentElement.classList.toggle(
+        "dark",
+        appearance.mode === "dark" ||
+          (appearance.mode === "system" && system.matches),
+      );
+    }
+    apply();
+    system.addEventListener("change", apply);
+    return () => system.removeEventListener("change", apply);
+  }, [appearance]);
+  useEffect(() => {
+    if (!user && !isDemo) return;
+    let active = true;
+    setAppearanceBusy(true);
+    service
+      .appearance(userId)
+      .then((value) => {
+        if (active) {
+          setAppearance(value);
+          if (!isDemo) saveLocalAppearance(value);
+        }
+      })
+      .catch((error) => {
+        if (active) setError(message(error));
+      })
+      .finally(() => {
+        if (active) setAppearanceBusy(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user?.id, isDemo, service]);
+  async function changeAppearance(next: Appearance) {
+    setAppearanceBusy(true);
+    try {
+      if (user || isDemo) await service.saveAppearance(userId, next);
+      if (!isDemo) saveLocalAppearance(next);
+      setAppearance(next);
+    } catch (error) {
+      setError(message(error));
+    } finally {
+      setAppearanceBusy(false);
+    }
+  }
+  const navigation = useRef<HTMLDivElement>(null);
+  function leaveNavigation(next: EventTarget | null) {
+    if (
+      freeSidebar &&
+      window.matchMedia("(hover: hover)").matches &&
+      !(next instanceof Node && navigation.current?.contains(next))
+    ) {
+      if (navigation.current?.querySelector(":hover")) return;
+      setSidebar(false);
+    }
+  }
+  const appearanceShortcut = (
+    <AppearanceShortcut
+      appearance={appearance}
+      busy={appearanceBusy}
+      onChange={changeAppearance}
+    />
+  );
+  const menuControls = (
+    <div
+      className="nav-controls"
+      role="group"
+      aria-label="Controles do menu lateral"
+      onPointerLeave={(event) => {
+        if (
+          event.pointerType === "mouse" &&
+          !document
+            .getElementById("main-sidebar")
+            ?.contains(document.activeElement)
+        )
+          leaveNavigation(event.relatedTarget);
+      }}
+      onBlur={(event) => leaveNavigation(event.relatedTarget)}
+    >
+      <Button
+        size="icon"
+        variant="ghost"
+        aria-controls="main-sidebar"
+        aria-expanded={sidebar}
+        aria-label={sidebar ? "Recolher menu" : "Abrir menu"}
+        onClick={() => setSidebar(!sidebar)}
+      >
+        <ChevronRight
+          className={sidebar ? "sidebar-arrow-open" : ""}
+          size={19}
+        />
+      </Button>
+      <Button
+        size="icon"
+        variant="ghost"
+        className="sidebar-mode-toggle"
+        aria-pressed={freeSidebar}
+        title={freeSidebar ? "Modo Livre" : "Modo Travado"}
+        aria-label={
+          freeSidebar
+            ? "Modo Livre. Ativar Modo Travado"
+            : "Modo Travado. Ativar Modo Livre"
+        }
+        onClick={() => {
+          localStorage.setItem(
+            "vuxlab-sidebar",
+            freeSidebar ? "locked" : "free",
+          );
+          if (!freeSidebar) setSidebar(false);
+          setFreeSidebar(!freeSidebar);
+        }}
+      >
+        {freeSidebar ? <LockOpen size={16} /> : <Lock size={16} />}
+      </Button>
+    </div>
+  );
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getSession().then(({ data, error }) => {
@@ -122,6 +258,7 @@ export default function App() {
   if (!user && !isDemo)
     return (
       <Auth
+        appearanceShortcut={appearanceShortcut}
         onDemo={() => {
           sessionStorage.setItem("vuxlab-demo", "1");
           setDemo(true);
@@ -129,103 +266,124 @@ export default function App() {
       />
     );
   return (
-    <div className="shell">
+    <div
+      className={`shell ${inEditor ? "room-shell" : ""} ${freeSidebar ? "sidebar-free" : ""} ${sidebar ? "sidebar-expanded" : ""}`}
+    >
       {sidebar && (
         <div className="sidebar-backdrop" onClick={() => setSidebar(false)} />
       )}
-      <aside className={`sidebar ${sidebar ? "is-open" : ""}`}>
-        <Link className="brand" to="/">
-          <div className="brand-mark">
-            <Boxes size={25} />
-          </div>
-          vuxlab<span className="brand-dot">.</span>
-        </Link>
-        <div className="sidebar-section">SEU AMBIENTE</div>
-        <Link
-          className={`nav-item ${location.pathname === "/" ? "active" : ""}`}
-          to="/"
-          onClick={() => setSidebar(false)}
-        >
-          <LayoutGrid size={18} />
-          Workspaces
-        </Link>
-        <div className="sidebar-section">
-          WORKSPACES <span>{spaces.length}</span>
-        </div>
-        {spaces.map((w) => (
-          <Link
-            onClick={() => setSidebar(false)}
-            className={`nav-item ${w.id === activeId ? "active" : ""}`}
-            key={w.id}
-            to={`/w/${w.id}`}
-          >
-            <span className="workspace-initial">{w.name[0]}</span>
-            <span className="ellipsis">{w.name}</span>
-            <ChevronRight size={14} />
-          </Link>
-        ))}
-        <div className="sidebar-bottom">
-          <div className="sidebar-tip">
-            <ShieldCheck size={20} />
-            <strong>Um lugar para cada coisa.</strong>
-            <p>Organize seus espaços e trabalhe junto com sua equipe.</p>
-          </div>
-          <Link
-            to="/notas"
-            className={`nav-item ${location.pathname === "/notas" ? "active" : ""}`}
-            onClick={() => setSidebar(false)}
-          >
-            <NotebookPen size={18} />
-            Minhas notas
-          </Link>
-          <Link
-            to="/conta"
-            className="nav-item"
-            onClick={() => setSidebar(false)}
-          >
-            <Settings size={18} />
-            Minha conta
-          </Link>
-          <button
-            className="nav-item"
-            onClick={async () => {
-              if (isDemo) {
-                sessionStorage.removeItem("vuxlab-demo");
-                setDemo(false);
-              } else await supabase!.auth.signOut();
-              navigate("/");
+      <div className="sidebar-navigation" ref={navigation}>
+        {freeSidebar && !sidebar && (
+          <div
+            className="sidebar-edge"
+            aria-hidden="true"
+            onPointerEnter={(event) => {
+              if (
+                event.pointerType === "mouse" &&
+                matchMedia("(hover: hover)").matches
+              )
+                setSidebar(true);
             }}
+          />
+        )}
+        {menuControls}
+        <aside
+          id="main-sidebar"
+          className={`sidebar ${sidebar ? "is-open" : ""}`}
+          inert={!sidebar}
+          onPointerLeave={(event) => {
+            if (
+              event.pointerType === "mouse" &&
+              !event.currentTarget.contains(document.activeElement)
+            )
+              leaveNavigation(event.relatedTarget);
+          }}
+          onBlur={(event) => leaveNavigation(event.relatedTarget)}
+        >
+          <Link className="brand" to="/">
+            <div className="brand-mark">
+              <Boxes size={25} />
+            </div>
+            vuxlab<span className="brand-dot">.</span>
+          </Link>
+          <div className="sidebar-section">SEU AMBIENTE</div>
+          <Link
+            className={`nav-item ${location.pathname === "/" ? "active" : ""}`}
+            to="/"
+            onClick={() => setSidebar(false)}
           >
-            <LogOut size={18} />
-            Sair
-          </button>
-          <div className="profile">
-            <span className="avatar">
-              {(displayName?.[0] || user?.email?.[0] || "V").toUpperCase()}
-            </span>
-            <div>
-              <strong>
-                {displayName || user?.email?.split("@")[0] || "Sua conta"}
-              </strong>
-              <small>
-                {isDemo ? "Dados salvos neste navegador" : "Sua conta Vuxlab"}
-              </small>
+            <LayoutGrid size={18} />
+            Workspaces
+          </Link>
+          <div className="sidebar-section">
+            WORKSPACES <span>{spaces.length}</span>
+          </div>
+          {spaces.map((w) => (
+            <Link
+              onClick={() => setSidebar(false)}
+              className={`nav-item ${w.id === activeId ? "active" : ""}`}
+              key={w.id}
+              to={`/w/${w.id}`}
+            >
+              <span className="workspace-initial">{w.name[0]}</span>
+              <span className="ellipsis">{w.name}</span>
+              <ChevronRight size={14} />
+            </Link>
+          ))}
+          <div className="sidebar-bottom">
+            <div className="sidebar-tip">
+              <ShieldCheck size={20} />
+              <strong>Um lugar para cada coisa.</strong>
+              <p>Organize seus espaços e trabalhe junto com sua equipe.</p>
+            </div>
+            <Link
+              to="/notas"
+              className={`nav-item ${location.pathname === "/notas" ? "active" : ""}`}
+              onClick={() => setSidebar(false)}
+            >
+              <NotebookPen size={18} />
+              Minhas notas
+            </Link>
+            <Link
+              to="/conta"
+              className="nav-item"
+              onClick={() => setSidebar(false)}
+            >
+              <Settings size={18} />
+              Minha conta
+            </Link>
+            <button
+              className="nav-item"
+              onClick={async () => {
+                if (isDemo) {
+                  sessionStorage.removeItem("vuxlab-demo");
+                  setDemo(false);
+                } else await supabase!.auth.signOut();
+                navigate("/");
+              }}
+            >
+              <LogOut size={18} />
+              Sair
+            </button>
+            <div className="profile">
+              <span className="avatar">
+                {(displayName?.[0] || user?.email?.[0] || "V").toUpperCase()}
+              </span>
+              <div>
+                <strong>
+                  {displayName || user?.email?.split("@")[0] || "Sua conta"}
+                </strong>
+                <small>
+                  {isDemo ? "Dados salvos neste navegador" : "Sua conta Vuxlab"}
+                </small>
+              </div>
             </div>
           </div>
-        </div>
-      </aside>
+        </aside>
+      </div>
       <div className="main-shell">
-        <header className="topbar">
+        <header className="topbar" hidden={inEditor}>
           <div className="row">
-            <Button
-              size="icon"
-              variant="ghost"
-              className="mobile-only"
-              onClick={() => setSidebar(!sidebar)}
-              aria-label="Abrir menu"
-            >
-              <Menu size={20} />
-            </Button>
             <span className="muted">Meu ambiente</span>
             {active && (
               <>
@@ -238,14 +396,7 @@ export default function App() {
             {isDemo && (
               <span className="badge demo-badge">Demonstração local</span>
             )}
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={dark ? "Usar tema claro" : "Usar tema escuro"}
-              onClick={() => setDark(!dark)}
-            >
-              {dark ? <Sun size={18} /> : <Moon size={18} />}
-            </Button>
+            {appearanceShortcut}
             <span className="avatar small">
               {(displayName?.[0] || user?.email?.[0] || "V").toUpperCase()}
             </span>
@@ -282,6 +433,7 @@ export default function App() {
                   fail={setError}
                   isDemo={isDemo}
                   refreshSpaces={refresh}
+                  appearanceShortcut={appearanceShortcut}
                 />
               ) : (
                 <div className="page empty">
@@ -326,6 +478,9 @@ export default function App() {
                 service={service}
                 displayName={displayName}
                 onNameChange={setDisplayName}
+                appearance={appearance}
+                appearanceBusy={appearanceBusy}
+                onAppearanceChange={changeAppearance}
               />
             }
           />
@@ -338,12 +493,19 @@ export default function App() {
 export function message(e: unknown) {
   return e instanceof Error ? e.message : String(e);
 }
-function Auth({ onDemo }: { onDemo: () => void }) {
+function Auth({
+  onDemo,
+  appearanceShortcut,
+}: {
+  onDemo: () => void;
+  appearanceShortcut: ReactNode;
+}) {
   const [mode, setMode] = useState<"login" | "signup" | "reset" | "password">(
       location.hash.includes("type=recovery") ? "password" : "login",
     ),
     [busy, setBusy] = useState(false),
-    [info, setInfo] = useState("");
+    [info, setInfo] = useState(""),
+    [passwordMismatch, setPasswordMismatch] = useState(false);
   useEffect(() => {
     if (!supabase) return;
     const { data } = supabase.auth.onAuthStateChange((e) => {
@@ -353,16 +515,30 @@ function Auth({ onDemo }: { onDemo: () => void }) {
   }, []);
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setBusy(true);
+    const form = e.currentTarget;
+    const f = new FormData(form);
+    const email = String(f.get("email") ?? "").trim();
+    const password = String(f.get("password") ?? "");
+    const displayName = String(f.get("display_name") ?? "").trim();
     setInfo("");
-    const f = new FormData(e.currentTarget);
+    if (mode === "signup") {
+      if (!displayName) {
+        setInfo("Informe seu nome de exibição.");
+        document.getElementById("auth-display-name")?.focus();
+        return;
+      }
+      if (password !== f.get("password_confirmation")) {
+        setPasswordMismatch(true);
+        document.getElementById("auth-password-confirmation")?.focus();
+        return;
+      }
+    }
+    setBusy(true);
     try {
       if (!supabase)
         throw Error(
           "Supabase não configurado. Você pode explorar a demonstração abaixo.",
         );
-      const email = String(f.get("email") || ""),
-        password = String(f.get("password") || "");
       let result;
       if (mode === "login")
         result = await supabase.auth.signInWithPassword({ email, password });
@@ -370,7 +546,10 @@ function Auth({ onDemo }: { onDemo: () => void }) {
         result = await supabase.auth.signUp({
           email,
           password,
-          options: { emailRedirectTo: location.origin },
+          options: {
+            emailRedirectTo: location.origin,
+            data: { display_name: displayName },
+          },
         });
       else if (mode === "reset")
         result = await supabase.auth.resetPasswordForEmail(email, {
@@ -423,6 +602,7 @@ function Auth({ onDemo }: { onDemo: () => void }) {
       </section>
       <section className="auth-form">
         <div>
+          <div className="auth-appearance">{appearanceShortcut}</div>
           <span className="eyebrow">BEM-VINDO AO VUXLAB</span>
           <h2>
             {mode === "signup"
@@ -438,23 +618,43 @@ function Auth({ onDemo }: { onDemo: () => void }) {
               ? "Seu próximo espaço começa aqui."
               : "Entre para acessar seus Workspaces."}
           </p>
-          <form onSubmit={submit}>
+          <form
+            onSubmit={submit}
+            onChange={() => {
+              if (passwordMismatch) setPasswordMismatch(false);
+            }}
+          >
+            {mode === "signup" && (
+              <label htmlFor="auth-display-name">
+                Nome de exibição
+                <input
+                  id="auth-display-name"
+                  name="display_name"
+                  autoComplete="nickname"
+                  maxLength={100}
+                  required
+                  placeholder="Como você quer ser chamado?"
+                />
+              </label>
+            )}
             {mode !== "password" && (
-              <label>
+              <label htmlFor="auth-email">
                 E-mail
                 <input
+                  id="auth-email"
                   name="email"
                   type="email"
                   required
                   placeholder="voce@escola.edu.br"
-                  autoComplete="email"
+                  autoComplete={mode === "login" ? "username" : "email"}
                 />
               </label>
             )}
             {mode !== "reset" && (
-              <label>
+              <label htmlFor="auth-password">
                 Senha
                 <input
+                  id="auth-password"
                   name="password"
                   type="password"
                   required
@@ -464,6 +664,31 @@ function Auth({ onDemo }: { onDemo: () => void }) {
                   }
                   placeholder="Pelo menos 8 caracteres"
                 />
+              </label>
+            )}
+            {mode === "signup" && (
+              <label htmlFor="auth-password-confirmation">
+                Confirme a senha
+                <input
+                  id="auth-password-confirmation"
+                  name="password_confirmation"
+                  type="password"
+                  autoComplete="new-password"
+                  required
+                  aria-invalid={passwordMismatch || undefined}
+                  aria-describedby={
+                    passwordMismatch ? "auth-password-mismatch" : undefined
+                  }
+                />
+                {passwordMismatch && (
+                  <span
+                    id="auth-password-mismatch"
+                    role="alert"
+                    className="danger-text"
+                  >
+                    As senhas precisam ser iguais.
+                  </span>
+                )}
               </label>
             )}
             {info && (
@@ -627,6 +852,7 @@ function WorkspaceList({
 }
 function WorkspacePage({
   workspace: w,
+  appearanceShortcut,
   service,
   userId,
   fail,
@@ -634,6 +860,7 @@ function WorkspacePage({
   refreshSpaces,
 }: {
   workspace: Workspace;
+  appearanceShortcut: ReactNode;
   service: Api;
   userId: string;
   fail: (s: string) => void;
@@ -693,6 +920,7 @@ function WorkspacePage({
         service={service}
         fail={fail}
         onReload={refresh}
+        appearanceShortcut={appearanceShortcut}
       />
     ) : (
       <div className="page empty">
@@ -758,6 +986,7 @@ function WorkspacePage({
           <div className="search">
             <Search size={16} />
             <input
+              name="room_search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Buscar sala"
@@ -1013,6 +1242,7 @@ function Members({
               <small>{roles[m.role]}</small>
             </div>
             <select
+              name={`member-role-${m.user_id}`}
               aria-label={`Papel de ${m.user_id}`}
               value={m.role}
               disabled={isDemo}
@@ -1119,7 +1349,12 @@ function Members({
         {link && (
           <div className="notice">
             <p>Copie agora. O token não poderá ser consultado novamente.</p>
-            <input readOnly value={link} aria-label="Link de convite" />
+            <input
+              name="invite_link"
+              readOnly
+              value={link}
+              aria-label="Link de convite"
+            />
             <Button
               variant="outline"
               onClick={async () => {
@@ -1214,10 +1449,16 @@ function Account({
   service,
   displayName,
   onNameChange,
+  appearance,
+  appearanceBusy,
+  onAppearanceChange,
 }: {
   service: Api;
   displayName: string;
   onNameChange: (name: string) => void;
+  appearance: Appearance;
+  appearanceBusy: boolean;
+  onAppearanceChange: (next: Appearance) => Promise<void>;
   isDemo: boolean;
   email?: string;
   fail: (s: string) => void;
@@ -1257,6 +1498,7 @@ function Account({
           <label>
             Nome de usuário
             <input
+              name="display_name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
@@ -1274,6 +1516,14 @@ function Account({
             {profileInfo}
           </p>
         )}
+      </section>
+      <section className="panel">
+        <h3>Aparência</h3>
+        <AppearanceFields
+          appearance={appearance}
+          busy={appearanceBusy}
+          onChange={onAppearanceChange}
+        />
       </section>
       <section className="panel">
         <h3>Seu acesso</h3>

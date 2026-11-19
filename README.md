@@ -157,3 +157,13 @@ O novo atalho Minhas notas, acima de Minha conta e Sair, reúne as notas particu
 Cartões de sala têm altura uniforme de 108 px com miniatura simplificada do mapa, nome, dimensões e contagem de objetos. Busca e Importar JSON têm 40 px de altura; o campo nativo de arquivo não aparece como controle adicional.
 
 Para atualizar uma instalação que já aplicou a migration inicial e a atualização Vitest 5.1.0, basta substituir a pasta src pela pasta src deste pacote. Preserve .env.local e a instalação existente. Não execute novamente o SQL inicial: esta atualização não tem migration, biblioteca nova ou mudança de credenciais. Reinicie o servidor se necessário e atualize a página.
+
+
+## Atualização do editor de salas
+
+- Redimensione um objeto por **Largura** e **Altura** ou pela alça do objeto selecionado. A área é retangular e precisa caber na sala sem sobreposição. JSONs antigos continuam válidos com objetos de uma célula.
+- Arraste o mapa com botão do meio, botão direito, toque ou **Mover mapa**. Ao focar a área do mapa pelo teclado, use as setas para mover a vista. **Centralizar** restaura o zoom a 100% e foca o PC mestre, ou o centro da grade se não houver um. A orientação é uma preferência da conta por sala.
+- **Notas compartilhadas** abre o atributo existente em um painel próprio. **Minha conta → Aparência** oferece Padrão, Vital, Alto Contraste e Café com os modos Claro, Escuro e Sistema.
+- Para publicar esta versão, aplique as migrações `202611190001_editor_preferences.sql` e `202611190002_signup_display_name.sql` no Supabase, nessa ordem antes de atualizar o frontend. A migração preserva os objetos existentes e permite desfazer a última operação anterior à atualização.
+
+Para versões futuras: cores personalizadas para objetos, formatos em U, ícones top-down 3D ou isométricos com rotação própria e modelos de ambientes (informática, química, sala de aula, biblioteca e pátio).

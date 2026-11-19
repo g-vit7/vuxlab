@@ -1,4 +1,9 @@
 import { supabase } from "./supabase";
+import {
+  localAppearance,
+  saveLocalAppearance,
+  type Appearance,
+} from "./appearance";
 import { demo } from "./demo";
 import type { Room, Workspace, Note, Member, History, Role } from "./model";
 export function api(isDemo: boolean) {
@@ -19,6 +24,52 @@ export function api(isDemo: boolean) {
     return data || [];
   }
   return {
+    async appearance(userId: string): Promise<Appearance> {
+      if (isDemo) return localAppearance();
+      const { data, error } = await db!
+        .from("profiles")
+        .select("editor_theme,editor_mode")
+        .eq("id", userId)
+        .maybeSingle();
+      if (error) throw error;
+      return {
+        theme: data?.editor_theme ?? "default",
+        mode: data?.editor_mode ?? "system",
+      };
+    },
+    async saveAppearance(userId: string, appearance: Appearance) {
+      if (isDemo) return saveLocalAppearance(appearance);
+      const { error } = await db!.from("profiles").upsert({
+        id: userId,
+        editor_theme: appearance.theme,
+        editor_mode: appearance.mode,
+      });
+      if (error) throw error;
+    },
+    async roomTurn(roomId: string, userId: string): Promise<number> {
+      if (isDemo)
+        return Number(localStorage.getItem(`vuxlab-turn-${roomId}`)) || 0;
+      const { data, error } = await db!
+        .from("room_view_preferences")
+        .select("turn")
+        .eq("room_id", roomId)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (error) throw error;
+      return data?.turn ?? 0;
+    },
+    async saveRoomTurn(roomId: string, userId: string, turn: number) {
+      if (isDemo) {
+        localStorage.setItem(`vuxlab-turn-${roomId}`, String(turn));
+        return;
+      }
+      const { error } = await db!.from("room_view_preferences").upsert({
+        room_id: roomId,
+        user_id: userId,
+        turn,
+      });
+      if (error) throw error;
+    },
     async profile(): Promise<string> {
       if (isDemo)
         return (
