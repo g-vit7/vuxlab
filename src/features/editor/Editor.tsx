@@ -70,7 +70,23 @@ import {
 } from "../../lib/model";
 import type { Api } from "../../lib/api";
 import NoteCards from "../notes/NoteCards";
-import { toView, fromView, clampZoom, pinchGeometry } from "./view";
+import {
+  toView,
+  fromView,
+  clampZoom,
+  pinchGeometry,
+  viewFootprint,
+  resizeFootprint,
+  type Footprint,
+  type ResizeSide,
+} from "./view";
+const resizeHandles: Record<ResizeSide, string> = {
+  corner: "Redimensionar pelo canto inferior direito",
+  top: "Redimensionar pela borda superior",
+  right: "Redimensionar pela borda direita",
+  bottom: "Redimensionar pela borda inferior",
+  left: "Redimensionar pela borda esquerda",
+};
 const mobileDetailsQuery =
   "(max-width: 800px), (hover: none) and (pointer: coarse)";
 const landscapeQuery =
@@ -174,7 +190,9 @@ export default function Editor({
   }, []);
   const [pan, setPan] = useState(false);
   const [panning, setPanning] = useState(false);
-  const [size, setSize] = useState<{ width: number; height: number }>();
+  const [size, setSize] = useState<
+    Pick<Footprint, "width" | "height"> & Partial<Pick<Footprint, "x" | "y">>
+  >();
   const scroll = useRef<HTMLDivElement>(null);
   const detailsScroll = useRef<HTMLDivElement>(null);
   const closeDetailsButton = useRef<HTMLButtonElement>(null);
@@ -207,7 +225,14 @@ export default function Editor({
     gridY: number;
   } | null>(null);
   const skipClick = useRef(false);
-  const resizeDrag = useRef<typeof size>(undefined);
+  const resizeDrag = useRef<{
+    pointerId: number;
+    clientX: number;
+    clientY: number;
+    anchorX: number;
+    anchorY: number;
+    next?: Footprint;
+  }>(undefined);
   const dragged = useRef<{ id: string; dx: number; dy: number } | null>(null);
   const cells = useMemo(
     () =>
@@ -247,16 +272,15 @@ export default function Editor({
   const viewHeight = turn % 2 ? room.width : room.height;
   const preview = size && object ? { ...object, ...size } : undefined;
   function viewArea(o: LabObject) {
-    const a = toView(o, room.width, room.height, turn);
-    const b = toView(
-      { x: o.x + (o.width ?? 1) - 1, y: o.y + (o.height ?? 1) - 1 },
+    const box = viewFootprint(
+      { ...o, width: o.width ?? 1, height: o.height ?? 1 },
       room.width,
       room.height,
       turn,
     );
     return {
-      gridColumn: `${Math.max(1, Math.min(a.x, b.x))} / ${Math.min(viewWidth, Math.max(a.x, b.x)) + 1}`,
-      gridRow: `${Math.max(1, Math.min(a.y, b.y))} / ${Math.min(viewHeight, Math.max(a.y, b.y)) + 1}`,
+      gridColumn: `${Math.max(1, box.x)} / ${Math.min(viewWidth, box.x + box.width - 1) + 1}`,
+      gridRow: `${Math.max(1, box.y)} / ${Math.min(viewHeight, box.y + box.height - 1) + 1}`,
     };
   }
 
@@ -418,17 +442,27 @@ export default function Editor({
     return true;
   }
 
-  function pointAt(clientX: number, clientY: number) {
+  function visiblePointAt(clientX: number, clientY: number) {
     const rect = grid.current!.getBoundingClientRect();
+    return {
+      x: Math.floor((clientX - rect.left) / cell) + 1,
+      y: Math.floor((clientY - rect.top) / cell) + 1,
+    };
+  }
+
+  function pointAt(clientX: number, clientY: number) {
     return fromView(
-      {
-        x: Math.floor((clientX - rect.left) / cell) + 1,
-        y: Math.floor((clientY - rect.top) / cell) + 1,
-      },
+      visiblePointAt(clientX, clientY),
       room.width,
       room.height,
       turn,
     );
+  }
+
+  function cancelResize(pointerId: number) {
+    if (resizeDrag.current?.pointerId !== pointerId) return;
+    resizeDrag.current = undefined;
+    setSize(undefined);
   }
 
   function alignPinch(camera: NonNullable<typeof pinchCamera.current>) {
@@ -1208,14 +1242,14 @@ export default function Editor({
                             <span
                               role="img"
                               aria-label={warningLabel}
-                              className={`object-warning ${level} ${turn === 3 ? "warning-left" : ""}`}
+                              className={`object-warning ${level}`}
                             >
                               <TriangleAlert size={14} aria-hidden="true" />
                             </span>
                           ) : (
                             <button
                               type="button"
-                              className={`object-warning ${level} ${turn === 3 ? "warning-left" : ""}`}
+                              className={`object-warning ${level}`}
                               title={`${warningLabel} · Abrir notas compartilhadas`}
                               aria-label={`${warningLabel} em ${identifier(o)}. Abrir notas compartilhadas`}
                               onClick={() => openNotes("shared", o.id)}
@@ -1231,66 +1265,125 @@ export default function Editor({
                             {identifier(o)}
                           </span>
                         )}
-                        {manage && o.id === selected && !pan && !move && (
-                          <button
-                            className={`resize-handle corner-${turn}`}
-                            type="button"
-                            title="Arraste para redimensionar"
-                            aria-label="Redimensionar objeto"
-                            onClick={(e) => {
-                              if (e.detail === 0) {
+                        {manage &&
+                          o.id === selected &&
+                          !pan &&
+                          !move &&
+                          (
+                            Object.entries(resizeHandles) as [
+                              ResizeSide,
+                              string,
+                            ][]
+                          ).map(([side, label]) => (
+                            <button
+                              key={side}
+                              className={`resize-handle resize-${side}`}
+                              type="button"
+                              title={label}
+                              aria-label={label}
+                              onClick={(e) => {
+                                if (e.detail !== 0) return;
+                                setMobilePanelHidden(false);
                                 setPanel("attributes");
                                 requestAnimationFrame(() =>
                                   document
                                     .getElementById("object-width")
                                     ?.focus(),
                                 );
-                              }
-                            }}
-                            onPointerDown={(e) => {
-                              if (e.button !== 0) return;
-                              e.stopPropagation();
-                              e.currentTarget.setPointerCapture(e.pointerId);
-                              resizeDrag.current = {
-                                width: o.width ?? 1,
-                                height: o.height ?? 1,
-                              };
-                            }}
-                            onPointerMove={(e) => {
-                              if (!resizeDrag.current) return;
-                              const point = pointAt(e.clientX, e.clientY);
-                              resizeDrag.current = {
-                                width: Math.max(1, point.x - o.x + 1),
-                                height: Math.max(1, point.y - o.y + 1),
-                              };
-                              setSize(resizeDrag.current);
-                            }}
-                            onPointerCancel={() => {
-                              resizeDrag.current = undefined;
-                              setSize(undefined);
-                            }}
-                            onPointerUp={() => {
-                              const next = resizeDrag.current;
-                              resizeDrag.current = undefined;
-                              setSize(undefined);
-                              if (
-                                next &&
-                                (next.width !== (o.width ?? 1) ||
-                                  next.height !== (o.height ?? 1))
-                              )
-                                place(
-                                  { ...o, ...next },
-                                  "Objeto redimensionado",
+                              }}
+                              onPointerDown={(e) => {
+                                if (e.button !== 0 || resizeDrag.current)
+                                  return;
+                                e.stopPropagation();
+                                e.currentTarget.setPointerCapture(e.pointerId);
+                                const view = viewFootprint(
+                                  {
+                                    ...o,
+                                    width: o.width ?? 1,
+                                    height: o.height ?? 1,
+                                  },
+                                  room.width,
+                                  room.height,
+                                  turn,
                                 );
-                            }}
-                          >
-                            <ArrowDownRight
-                              aria-hidden="true"
-                              size={14}
-                              style={{ transform: `rotate(${turn * 90}deg)` }}
-                            />
-                          </button>
-                        )}
+                                resizeDrag.current = {
+                                  pointerId: e.pointerId,
+                                  clientX: e.clientX,
+                                  clientY: e.clientY,
+                                  anchorX:
+                                    side === "left"
+                                      ? view.x
+                                      : view.x + view.width - 1,
+                                  anchorY:
+                                    side === "top"
+                                      ? view.y
+                                      : view.y + view.height - 1,
+                                };
+                              }}
+                              onPointerMove={(e) => {
+                                if (
+                                  resizeDrag.current?.pointerId !== e.pointerId
+                                )
+                                  return;
+                                const next = resizeFootprint(
+                                  {
+                                    ...o,
+                                    width: o.width ?? 1,
+                                    height: o.height ?? 1,
+                                  },
+                                  room.width,
+                                  room.height,
+                                  turn,
+                                  side,
+                                  {
+                                    x:
+                                      resizeDrag.current.anchorX +
+                                      Math.round(
+                                        (e.clientX -
+                                          resizeDrag.current.clientX) /
+                                          cell,
+                                      ),
+                                    y:
+                                      resizeDrag.current.anchorY +
+                                      Math.round(
+                                        (e.clientY -
+                                          resizeDrag.current.clientY) /
+                                          cell,
+                                      ),
+                                  },
+                                );
+                                resizeDrag.current.next = next;
+                                setSize(next);
+                              }}
+                              onPointerCancel={(e) => cancelResize(e.pointerId)}
+                              onLostPointerCapture={(e) =>
+                                cancelResize(e.pointerId)
+                              }
+                              onPointerUp={(e) => {
+                                if (
+                                  resizeDrag.current?.pointerId !== e.pointerId
+                                )
+                                  return;
+                                const next = resizeDrag.current.next;
+                                cancelResize(e.pointerId);
+                                if (
+                                  next &&
+                                  (next.x !== o.x ||
+                                    next.y !== o.y ||
+                                    next.width !== (o.width ?? 1) ||
+                                    next.height !== (o.height ?? 1))
+                                )
+                                  place(
+                                    { ...o, ...next },
+                                    "Objeto redimensionado",
+                                  );
+                              }}
+                            >
+                              {side === "corner" && (
+                                <ArrowDownRight aria-hidden="true" size={14} />
+                              )}
+                            </button>
+                          ))}
                       </div>
                     );
                   })}
