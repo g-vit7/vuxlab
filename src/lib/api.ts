@@ -215,6 +215,20 @@ export function api(isDemo: boolean) {
       const { error } = await query.select("id").single();
       if (error) throw error;
     },
+    async setNoteResolved(
+      visibility: NoteVisibility,
+      id: string,
+      resolved: boolean,
+    ) {
+      if (isDemo) return demo.setNoteResolved(visibility, id, resolved);
+      const { error } = await db!
+        .from(visibility === "personal" ? "private_notes" : "shared_notes")
+        .update({ resolved })
+        .eq("id", id)
+        .select("id")
+        .single();
+      if (error) throw error;
+    },
     async deleteNote(visibility: NoteVisibility, id: string) {
       if (isDemo) return demo.deleteNote(visibility, id);
       const { error } = await db!

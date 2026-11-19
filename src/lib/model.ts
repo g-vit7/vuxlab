@@ -104,6 +104,7 @@ export type NoteDraft = NoteScope & {
 };
 export type Note = NoteDraft & {
   id: string;
+  resolved: boolean;
   author_id: string | null;
   author_name?: string | null;
 };

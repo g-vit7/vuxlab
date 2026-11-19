@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { ChevronDown, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Pencil,
+  Plus,
+  RotateCcw,
+  Trash2,
+} from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Dialog } from "../../components/ui/dialog";
 import {
@@ -33,6 +40,7 @@ type Props = {
   canEdit: (note: Note) => boolean;
   onSave: (draft: NoteDraft, id?: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onResolve: (id: string, resolved: boolean) => Promise<void>;
   fail: (message: string) => void;
 };
 
@@ -46,8 +54,11 @@ export default function NoteCards({
   canEdit,
   onSave,
   onDelete,
+  onResolve,
   fail,
 }: Props) {
+  const [archive, setArchive] = useState(false);
+  const [status, setStatus] = useState("");
   const [category, setCategory] = useState<"" | NoteCategory>("");
   const [grouping, setGrouping] = useState<"flat" | "urgency" | "author">(
     "flat",
@@ -55,7 +66,8 @@ export default function NoteCards({
   const [draft, setDraft] = useState<DraftState>();
   const [busy, setBusy] = useState(false);
   const sorted = orderNotes(notes).filter(
-    (note) => !category || note.category === category,
+    (note) =>
+      note.resolved === archive && (!category || note.category === category),
   );
   const groups = new Map<string, { title?: string; notes: Note[] }>();
   for (const note of sorted) {
@@ -74,6 +86,30 @@ export default function NoteCards({
 
   return (
     <section className="structured-notes" aria-label="Lista de notas">
+      <div
+        className="tabs notes-tabs note-status-tabs"
+        aria-label="Status das notas"
+      >
+        <button
+          type="button"
+          className={!archive ? "active" : ""}
+          aria-pressed={!archive}
+          onClick={() => setArchive(false)}
+        >
+          Ativas
+        </button>
+        <button
+          type="button"
+          className={archive ? "active" : ""}
+          aria-pressed={archive}
+          onClick={() => setArchive(true)}
+        >
+          Arquivadas
+        </button>
+      </div>
+      <span className="sr-only" role="status">
+        {status}
+      </span>
       <div className="note-controls">
         <label>
           Urgência
@@ -102,7 +138,7 @@ export default function NoteCards({
             <option value="author">Autor</option>
           </select>
         </label>
-        {locations.length > 0 && (
+        {!archive && locations.length > 0 && (
           <Button
             size="sm"
             onClick={() =>
@@ -114,7 +150,11 @@ export default function NoteCards({
         )}
       </div>
       {sorted.length === 0 && (
-        <p className="muted">Nenhuma nota para exibir.</p>
+        <p className="muted">
+          {archive
+            ? "Nenhuma nota arquivada."
+            : "Nenhuma nota ativa para exibir."}
+        </p>
       )}
       {[...groups].map(([key, group]) => (
         <section className="note-group" key={key}>
@@ -128,6 +168,7 @@ export default function NoteCards({
                 <span className="sr-only">
                   {noteCategories[note.category]}:{" "}
                 </span>
+                {note.resolved && <Check size={15} aria-label="Resolvida" />}
                 <strong>{noteTitle(note)}</strong>
                 {locationLabel && <small>{locationLabel(note)}</small>}
                 <ChevronDown size={16} aria-hidden="true" />
@@ -142,6 +183,41 @@ export default function NoteCards({
                 </small>
                 {canEdit(note) && (
                   <div className="row wrap">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={async () => {
+                        const resolved = !note.resolved;
+                        setBusy(true);
+                        try {
+                          await onResolve(note.id, resolved);
+                          setStatus(
+                            resolved
+                              ? "Nota resolvida e arquivada."
+                              : "Nota reaberta.",
+                          );
+                        } catch (error) {
+                          fail(
+                            error instanceof Error
+                              ? error.message
+                              : String(error),
+                          );
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    >
+                      {note.resolved ? (
+                        <>
+                          <RotateCcw size={14} /> Reabrir
+                        </>
+                      ) : (
+                        <>
+                          <Check size={14} /> Marcar como resolvida
+                        </>
+                      )}
+                    </Button>
                     <Button
                       size="sm"
                       variant="outline"

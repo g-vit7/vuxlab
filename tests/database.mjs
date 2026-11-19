@@ -763,5 +763,75 @@ await test("Notas estruturadas preservam dados antigos e exigem permissões por 
     [{ id: shared.id }],
   );
 });
+await db.exec("reset role");
+await db.exec(
+  await readFile(
+    new URL(
+      "../supabase/migrations/202611190004_archive_resolved_notes.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+);
+await test("Arquivar é reversível e mantém as permissões e o conteúdo da nota", async () => {
+  await as(teacher);
+  const shared = (
+    await db.query(
+      "insert into public.shared_notes(workspace_id,title,body,category) values($1,'Máquina','Verificar a máquina','critical') returning id,resolved",
+      [w],
+    )
+  ).rows[0];
+  assert.equal(shared.resolved, false);
+  const personal = (
+    await db.query(
+      "insert into public.private_notes(workspace_id,title,body) values($1,'Pessoal','Texto') returning id",
+      [w],
+    )
+  ).rows[0].id;
+
+  await as(pub);
+  assert.deepEqual(
+    (
+      await db.query(
+        "update public.shared_notes set resolved=true where id=$1 returning id",
+        [shared.id],
+      )
+    ).rows,
+    [],
+  );
+  await as(teacher);
+  assert.deepEqual(
+    (
+      await db.query(
+        "update public.shared_notes set resolved=true where id=$1 returning resolved,category,body",
+        [shared.id],
+      )
+    ).rows,
+    [{ resolved: true, category: "critical", body: "Verificar a máquina" }],
+  );
+  await db.query("update public.private_notes set resolved=true where id=$1", [
+    personal,
+  ]);
+
+  await as(admin);
+  assert.deepEqual(
+    (
+      await db.query(
+        "update public.private_notes set resolved=false where id=$1 returning id",
+        [personal],
+      )
+    ).rows,
+    [],
+  );
+  assert.deepEqual(
+    (
+      await db.query(
+        "update public.shared_notes set resolved=false where id=$1 returning resolved",
+        [shared.id],
+      )
+    ).rows,
+    [{ resolved: false }],
+  );
+});
 console.log(`\n${count} cenários PostgreSQL/RLS aprovados.`);
 await db.close();

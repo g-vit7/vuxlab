@@ -270,6 +270,10 @@ export default function PersonalNotes({
             await service.saveNote(visibility, draft, id);
             await reload();
           }}
+          onResolve={async (id, resolved) => {
+            await service.setNoteResolved(visibility, id, resolved);
+            await reload();
+          }}
           onDelete={async (id) => {
             await service.deleteNote(visibility, id);
             await reload();

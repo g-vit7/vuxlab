@@ -776,6 +776,7 @@ export default function Editor({
     const levels = new Map<string, NoteCategory>();
     for (const note of sharedNotes) {
       if (
+        note.resolved ||
         note.room_id !== room.id ||
         !note.object_id ||
         note.category === "reminder"
@@ -1918,6 +1919,10 @@ export default function Editor({
                         "Resolva o erro de salvamento da sala antes de salvar a nota.",
                       );
                     await service.saveNote(noteVisibility, draft, id);
+                    await getNotes(noteVisibility);
+                  }}
+                  onResolve={async (id, resolved) => {
+                    await service.setNoteResolved(noteVisibility, id, resolved);
                     await getNotes(noteVisibility);
                   }}
                   onDelete={async (id) => {

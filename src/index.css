@@ -3058,7 +3058,7 @@ textarea {
 .structured-note summary svg {
   flex-shrink: 0;
 }
-.structured-note[open] summary svg {
+.structured-note[open] summary svg:last-child {
   transform: rotate(180deg);
 }
 .structured-note-body {

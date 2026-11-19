@@ -75,6 +75,7 @@ function seed(): Store {
       category,
       author_id: DEMO_USER,
       visibility: "shared",
+      resolved: false,
       author_name: "Conta demonstrativa",
       noted_at: new Date().toISOString(),
     })),
@@ -108,6 +109,7 @@ function read(): Store {
                   noted_at: null,
                   author_id: null,
                   visibility: "shared",
+                  resolved: false,
                 });
             }
           }
@@ -276,12 +278,14 @@ export const demo = {
         title: note.title ?? "",
         category: note.category ?? "reminder",
         noted_at: note.noted_at ?? null,
+        resolved: note.resolved ?? false,
       }));
   },
   async saveNote(visibility: NoteVisibility, draft: NoteDraft, id?: string) {
     const state = read();
     const note = {
       ...draft,
+      resolved: state.notes.find((note) => note.id === id)?.resolved ?? false,
       id: id || crypto.randomUUID(),
       author_id: DEMO_USER,
       author_name:
@@ -289,6 +293,20 @@ export const demo = {
       visibility,
     };
     state.notes = state.notes.filter((x) => x.id !== note.id).concat(note);
+    write(state);
+  },
+  async setNoteResolved(
+    visibility: NoteVisibility,
+    id: string,
+    resolved: boolean,
+  ) {
+    const state = read();
+    const note = state.notes.find(
+      (item) =>
+        item.id === id && (item.visibility ?? "personal") === visibility,
+    );
+    if (!note) throw Error("Nota não encontrada.");
+    note.resolved = resolved;
     write(state);
   },
   async deleteNote(visibility: NoteVisibility, id: string) {
