@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent,
+  type ReactNode,
+} from "react";
 import { Link } from "react-router-dom";
 import {
   Monitor,
@@ -8,6 +15,10 @@ import {
   Plus,
   Minus,
   Maximize,
+  Minimize,
+  Hand,
+  Crosshair,
+  RotateCw,
   ArrowLeft,
   Download,
   History as HistoryIcon,
@@ -41,6 +52,9 @@ import {
   identifier,
   resizeRoom,
   roomSchema,
+  objectCells,
+  fitsRoom,
+  objectColors,
   type Room,
   type Workspace,
   type LabObject,
@@ -49,6 +63,7 @@ import {
   type Note,
 } from "../../lib/model";
 import type { Api } from "../../lib/api";
+import { toView, fromView } from "./view";
 const icons: Record<string, typeof Monitor> = {
   Monitor,
   DoorOpen,
@@ -77,6 +92,7 @@ export default function Editor({
   service,
   fail,
   onReload,
+  menuControls,
 }: {
   room: Room;
   workspace: Workspace;
@@ -84,6 +100,7 @@ export default function Editor({
   service: Api;
   fail: (s: string) => void;
   onReload: () => Promise<void>;
+  menuControls: ReactNode;
 }) {
   const [room, setRoom] = useState(initial),
     [selected, setSelected] = useState<string>(),
@@ -92,7 +109,9 @@ export default function Editor({
     [saveState, setSaveState] = useState<
       "saved" | "saving" | "pending" | "error"
     >("saved"),
-    [panel, setPanel] = useState<"attributes" | "notes">("attributes"),
+    [panel, setPanel] = useState<"attributes" | "notes" | "shared" | "room">(
+      "attributes",
+    ),
     [showHistory, setShowHistory] = useState(false),
     [history, setHistory] = useState<History[]>([]),
     [resize, setResize] = useState(false),
@@ -119,10 +138,288 @@ export default function Editor({
     queue = useRef(Promise.resolve()),
     failed = useRef(false),
     mounted = useRef(true);
-  const cells = new Map(room.objects.map((o) => [`${o.x}:${o.y}`, o]));
+  const [turn, setTurn] = useState(0);
+  const [viewReady, setViewReady] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [pan, setPan] = useState(false);
+  const [panning, setPanning] = useState(false);
+  const [size, setSize] = useState<{ width: number; height: number }>();
+  const scroll = useRef<HTMLDivElement>(null);
+  const grid = useRef<HTMLDivElement>(null);
+  const spaceHeld = useRef(false);
+  const centerPending = useRef(false);
+  const roomCameraInitialized = useRef(false);
+  const turnWrites = useRef(Promise.resolve());
+  const gesture = useRef<{
+    id: number;
+    x: number;
+    y: number;
+    left: number;
+    top: number;
+    moved: boolean;
+  } | null>(null);
+  const skipClick = useRef(false);
+  const resizeDrag = useRef<typeof size>(undefined);
+  const dragged = useRef<{ id: string; dx: number; dy: number } | null>(null);
+  const cells = useMemo(
+    () =>
+      new Map(
+        room.objects.flatMap((o) =>
+          objectCells(o).map((key) => [key, o] as const),
+        ),
+      ),
+    [room.objects],
+  );
   const manage = canManageRoom(w.role, room, userId),
     object = room.objects.find((o) => o.id === selected),
+    sharedNotes = object?.attributes.find(
+      (a) => a.name === "Notas compartilhadas",
+    ),
     cell = Math.round(68 * zoom);
+  const viewWidth = turn % 2 ? room.height : room.width;
+  const viewHeight = turn % 2 ? room.width : room.height;
+  const preview = size && object ? { ...object, ...size } : undefined;
+  function viewArea(o: LabObject) {
+    const a = toView(o, room.width, room.height, turn);
+    const b = toView(
+      { x: o.x + (o.width ?? 1) - 1, y: o.y + (o.height ?? 1) - 1 },
+      room.width,
+      room.height,
+      turn,
+    );
+    return {
+      gridColumn: `${Math.max(1, Math.min(a.x, b.x))} / ${Math.min(viewWidth, Math.max(a.x, b.x)) + 1}`,
+      gridRow: `${Math.max(1, Math.min(a.y, b.y))} / ${Math.min(viewHeight, Math.max(a.y, b.y)) + 1}`,
+    };
+  }
+
+  useEffect(() => {
+    let active = true;
+    service
+      .roomTurn(initial.id, userId)
+      .then((value) => {
+        if (active) {
+          setTurn(value);
+          setViewReady(true);
+        }
+      })
+      .catch((error) => {
+        if (active) fail(String(error));
+      });
+    return () => {
+      active = false;
+    };
+  }, [initial.id, userId, service]);
+
+  function orient(value: number) {
+    setTurn(value);
+    turnWrites.current = turnWrites.current
+      .then(() => service.saveRoomTurn(initial.id, userId, value))
+      .catch((error) => {
+        if (mounted.current) fail(String(error));
+      });
+  }
+
+  useEffect(() => {
+    function change() {
+      setFullscreen(document.fullscreenElement === document.documentElement);
+    }
+    function key(event: KeyboardEvent) {
+      if (
+        event.code === "Escape" &&
+        !document.fullscreenElement &&
+        !document.querySelector('[role="dialog"]')
+      )
+        setFullscreen(false);
+      if (
+        event.code !== "Space" ||
+        !scroll.current?.contains(document.activeElement)
+      )
+        return;
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest("button,input,textarea,select,a,[contenteditable]")
+      )
+        return;
+      spaceHeld.current = true;
+      event.preventDefault();
+    }
+    function release() {
+      spaceHeld.current = false;
+    }
+    document.addEventListener("fullscreenchange", change);
+    window.addEventListener("keydown", key);
+    window.addEventListener("keyup", release);
+    window.addEventListener("blur", release);
+    return () => {
+      document.removeEventListener("fullscreenchange", change);
+      window.removeEventListener("keydown", key);
+      window.removeEventListener("keyup", release);
+      window.removeEventListener("blur", release);
+      if (document.fullscreenElement === document.documentElement)
+        void document.exitFullscreen().catch(() => {});
+    };
+  }, []);
+
+  async function toggleFullscreen() {
+    try {
+      if (fullscreen && !document.fullscreenElement) setFullscreen(false);
+      else if (fullscreen) await document.exitFullscreen();
+      else await document.documentElement.requestFullscreen();
+    } catch {
+      setFullscreen(!fullscreen);
+    }
+  }
+
+  function centerMap() {
+    const canvas = scroll.current,
+      map = grid.current;
+    if (!canvas || !map) return;
+    const master = room.objects
+      .filter((o) => o.kind === "master")
+      .sort((a, b) => a.y - b.y || a.x - b.x)[0];
+    const focus = master
+      ? toView(
+          {
+            x: master.x + ((master.width ?? 1) - 1) / 2,
+            y: master.y + ((master.height ?? 1) - 1) / 2,
+          },
+          room.width,
+          room.height,
+          turn,
+        )
+      : { x: (viewWidth + 1) / 2, y: (viewHeight + 1) / 2 };
+    const outer = canvas.getBoundingClientRect(),
+      inner = map.getBoundingClientRect();
+    canvas.scrollBy(
+      inner.left - outer.left + (focus.x - 0.5) * cell - canvas.clientWidth / 2,
+      inner.top - outer.top + (focus.y - 0.5) * cell - canvas.clientHeight / 2,
+    );
+  }
+
+  useEffect(() => {
+    if (!roomCameraInitialized.current) {
+      roomCameraInitialized.current = true;
+      if (scroll.current)
+        scroll.current.scrollTo(
+          Math.max(0, scroll.current.clientWidth / 2 - 45),
+          Math.max(0, scroll.current.clientHeight / 2 - 20),
+        );
+    }
+    if (centerPending.current) {
+      centerPending.current = false;
+      centerMap();
+    }
+  }, [zoom]);
+
+  function canPlace(candidate: LabObject) {
+    return (
+      fitsRoom(candidate, room.width, room.height) &&
+      objectCells(candidate).every(
+        (key) => !cells.has(key) || cells.get(key)?.id === candidate.id,
+      )
+    );
+  }
+
+  function place(candidate: LabObject, label: string) {
+    if (failed.current) return false;
+    if (!manage || !canPlace(candidate)) {
+      fail("A área precisa estar livre e dentro da grade.");
+      return false;
+    }
+    update(
+      {
+        ...current.current,
+        objects: current.current.objects.map((o) =>
+          o.id === candidate.id
+            ? {
+                ...o,
+                x: candidate.x,
+                y: candidate.y,
+                width: candidate.width,
+                height: candidate.height,
+              }
+            : o,
+        ),
+      },
+      label,
+      true,
+    );
+    setSelected(candidate.id);
+    return true;
+  }
+
+  function pointAt(clientX: number, clientY: number) {
+    const rect = grid.current!.getBoundingClientRect();
+    return fromView(
+      {
+        x: Math.floor((clientX - rect.left) / cell) + 1,
+        y: Math.floor((clientY - rect.top) / cell) + 1,
+      },
+      room.width,
+      room.height,
+      turn,
+    );
+  }
+
+  function startPan(event: PointerEvent<HTMLDivElement>) {
+    if (!event.isPrimary && event.pointerType === "touch") return;
+    if (
+      event.button !== 1 &&
+      event.button !== 2 &&
+      event.pointerType !== "touch" &&
+      !(event.button === 0 && (pan || spaceHeld.current))
+    )
+      return;
+    const canvas = event.currentTarget;
+    skipClick.current = false;
+    gesture.current = {
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      left: canvas.scrollLeft,
+      top: canvas.scrollTop,
+      moved: false,
+    };
+    canvas.setPointerCapture(event.pointerId);
+    if (event.pointerType !== "touch") event.preventDefault();
+  }
+
+  function movePan(event: PointerEvent<HTMLDivElement>) {
+    const start = gesture.current;
+    if (!start || start.id !== event.pointerId) return;
+    const dx = event.clientX - start.x,
+      dy = event.clientY - start.y;
+    if (!start.moved && Math.hypot(dx, dy) < 5) return;
+    start.moved = true;
+    setPanning(true);
+    event.currentTarget.scrollTo(start.left - dx, start.top - dy);
+  }
+
+  function endPan(event: PointerEvent<HTMLDivElement>) {
+    const start = gesture.current;
+    if (!start || start.id !== event.pointerId) return;
+    gesture.current = null;
+    setPanning(false);
+    skipClick.current = true;
+    if (
+      !start.moved &&
+      event.pointerType === "touch" &&
+      !pan &&
+      event.type === "pointerup"
+    ) {
+      const target = document.elementFromPoint(event.clientX, event.clientY);
+      if (target?.closest(".room-grid")) {
+        const point = pointAt(event.clientX, event.clientY);
+        clickCell(point.x, point.y);
+      }
+    }
+    requestAnimationFrame(() => {
+      skipClick.current = false;
+    });
+  }
+
   useEffect(() => {
     current.current = initial;
     version.current = initial.version;
@@ -256,6 +553,7 @@ export default function Editor({
   useEffect(() => {
     setNoteId(undefined);
     setNoteText("");
+    setSize(undefined);
     if (!selected && noteScope === "object") setNoteScope("room");
   }, [selected]);
   const scopedNotes = notes.filter((n) =>
@@ -266,16 +564,9 @@ export default function Editor({
         : n.object_id === selected,
   );
   function clickCell(x: number, y: number) {
-    const occupied = current.current.objects.find(
-      (o) => o.x === x && o.y === y,
-    );
+    const occupied = cells.get(`${x}:${y}`);
     if (move && object) {
-      if (occupied && occupied.id !== object.id) {
-        fail("Esta célula já está ocupada.");
-        return;
-      }
-      patchObject((o) => ({ ...o, x, y }), "Objeto movido");
-      setMove(false);
+      if (place({ ...object, x, y }, "Objeto movido")) setMove(false);
       return;
     }
     if (occupied) {
@@ -293,7 +584,11 @@ export default function Editor({
         true,
       );
       setSelected(o.id);
-    } else setSelected(undefined);
+      setPanel("attributes");
+    } else {
+      setSelected(undefined);
+      setPanel("attributes");
+    }
   }
   async function loadHistory() {
     await flush();
@@ -318,15 +613,18 @@ export default function Editor({
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   return (
-    <main className="editor-page">
-      <div className="editor-heading">
-        <div>
+    <main
+      className={`editor-page ${fullscreen ? "editor-fullscreen" : ""} ${object || panel === "notes" || panel === "room" ? "has-properties" : ""}`}
+    >
+      <div className="editor-heading" role="region" aria-label="Ações da sala">
+        <div className="room-heading-title">
+          {!fullscreen && menuControls}
           <Link className="back-link" to={`/w/${w.id}`}>
             <ArrowLeft size={14} />
-            Todas as salas
+            <span className="sr-only">Todas as salas</span>
           </Link>
           <div className="row">
-            <h1>{room.name}</h1>
+            <h1 title={room.name}>{room.name}</h1>
             {manage && (
               <Button
                 size="icon"
@@ -338,12 +636,6 @@ export default function Editor({
               </Button>
             )}
           </div>
-          <p className="muted tiny">
-            {room.width} × {room.height} células{" "}
-            <span className="dot-separator">·</span> {room.objects.length}{" "}
-            objetos <span className="dot-separator">·</span>{" "}
-            {rolesLabel(w.role)}
-          </p>
         </div>
         <div className="row wrap">
           <span className={`save-indicator ${saveState}`} role="status">
@@ -363,12 +655,22 @@ export default function Editor({
               }[saveState]
             }
           </span>
-          <Button size="sm" variant="outline" onClick={exportRoom}>
+          <Button
+            size="sm"
+            variant="outline"
+            aria-label="Exportar"
+            onClick={exportRoom}
+          >
             <Download size={15} />
             <span className="hide-small">Exportar</span>
           </Button>
           {w.role !== "public" && (
-            <Button size="sm" variant="outline" onClick={loadHistory}>
+            <Button
+              size="sm"
+              variant="outline"
+              aria-label="Histórico"
+              onClick={loadHistory}
+            >
               <HistoryIcon size={15} />
               <span className="hide-small">Histórico</span>
             </Button>
@@ -453,6 +755,19 @@ export default function Editor({
                 ))}
             </div>
             <div className="row">
+              {manage && !object && (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  title="Detalhes da sala"
+                  aria-label="Detalhes da sala"
+                  onClick={() =>
+                    setPanel(panel === "attributes" ? "room" : "attributes")
+                  }
+                >
+                  <Settings size={16} />
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="icon"
@@ -481,106 +796,240 @@ export default function Editor({
               </Button>
             </div>
           </div>
-          <div className="canvas-scroll">
-            <div
-              className="map-wrap"
-              style={{
-                width: (room.width + 1) * cell + 60,
-                minHeight: (room.height + 1) * cell + 35,
-              }}
-            >
+          <div
+            ref={scroll}
+            className={`canvas-scroll ${pan ? "pan-tool" : ""} ${panning ? "panning" : ""}`}
+            tabIndex={0}
+            aria-label="Área do mapa. Use as setas para deslocar."
+            onKeyDown={(e) => {
+              if (e.target !== e.currentTarget) return;
+              const dx =
+                e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
+              const dy =
+                e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
+              if (dx || dy) {
+                e.preventDefault();
+                e.currentTarget.scrollBy(dx * cell, dy * cell);
+              }
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+            onPointerDown={startPan}
+            onPointerMove={movePan}
+            onPointerUp={endPan}
+            onPointerCancel={endPan}
+            onAuxClick={(e) => e.preventDefault()}
+            onClickCapture={(e) => {
+              if (skipClick.current || (pan && e.detail > 0))
+                e.stopPropagation();
+            }}
+            onDragStartCapture={(e) => {
+              if (gesture.current || pan || spaceHeld.current)
+                e.preventDefault();
+            }}
+          >
+            <div className="map-wrap room-map" style={{ width: "max-content" }}>
               <div
                 className="coordinate-row"
+                aria-hidden="true"
                 style={{
-                  gridTemplateColumns: `repeat(${room.width},${cell}px)`,
-                  marginLeft: cell,
+                  gridTemplateColumns: `repeat(${viewWidth},${cell}px)`,
                 }}
               >
-                {Array.from({ length: room.width }, (_, i) => (
-                  <span key={i}>{i + 1}</span>
+                {Array.from({ length: viewWidth }, (_, i) => (
+                  <span key={i} />
                 ))}
               </div>
               <div className="map-and-axis">
                 <div
                   className="coordinate-col"
+                  aria-hidden="true"
                   style={{
                     width: cell,
-                    gridTemplateRows: `repeat(${room.height},${cell}px)`,
+                    marginLeft: -cell,
+                    gridTemplateRows: `repeat(${viewHeight},${cell}px)`,
                   }}
                 >
-                  {Array.from({ length: room.height }, (_, i) => (
-                    <span key={i}>{i + 1}</span>
+                  {Array.from({ length: viewHeight }, (_, i) => (
+                    <span key={i} />
                   ))}
                 </div>
                 <div
-                  className={`room-grid ${move ? "moving" : ""}`}
+                  ref={grid}
+                  className={`room-grid ${move ? "moving" : ""} ${zoom < 0.7 ? "map-compact" : ""}`}
                   style={{
-                    gridTemplateColumns: `repeat(${room.width},${cell}px)`,
-                    gridTemplateRows: `repeat(${room.height},${cell}px)`,
+                    gridTemplateColumns: `repeat(${viewWidth},${cell}px)`,
+                    gridTemplateRows: `repeat(${viewHeight},${cell}px)`,
                   }}
                   role="group"
                   aria-label={`Mapa da sala ${room.name}`}
+                  onDragOver={(e) => {
+                    if (dragged.current) e.preventDefault();
+                  }}
+                  onDrop={(e) => {
+                    const origin = dragged.current;
+                    if (!origin || !manage) return;
+                    e.preventDefault();
+                    const candidate = current.current.objects.find(
+                      (o) => o.id === origin.id,
+                    );
+                    if (!candidate) return;
+                    const point = pointAt(e.clientX, e.clientY);
+                    if (
+                      place(
+                        {
+                          ...candidate,
+                          x: point.x - origin.dx,
+                          y: point.y - origin.dy,
+                        },
+                        "Objeto movido",
+                      )
+                    )
+                      setPanel("attributes");
+                  }}
                 >
-                  {Array.from({ length: room.width * room.height }, (_, i) => {
-                    const x = (i % room.width) + 1,
-                      y = Math.floor(i / room.width) + 1,
-                      o = cells.get(`${x}:${y}`);
-                    return (
+                  {Array.from({ length: viewWidth * viewHeight }, (_, i) => {
+                    const vx = (i % viewWidth) + 1,
+                      vy = Math.floor(i / viewWidth) + 1;
+                    const { x, y } = fromView(
+                      { x: vx, y: vy },
+                      room.width,
+                      room.height,
+                      turn,
+                    );
+                    const occupied = cells.has(`${x}:${y}`);
+                    return occupied ? (
+                      <div
+                        key={i}
+                        style={{ gridColumn: vx, gridRow: vy }}
+                        className="map-tile"
+                      />
+                    ) : (
                       <button
-                        key={`${x}:${y}`}
-                        className={`grid-cell ${o ? "occupied " + o.color : ""} ${o?.id === selected ? "selected" : ""}`}
-                        aria-label={
-                          o
-                            ? `${identifier(o)}, coluna ${x}, linha ${y}`
-                            : `Célula vazia, coluna ${x}, linha ${y}`
-                        }
-                        aria-pressed={!!o && o.id === selected}
-                        draggable={manage && !!o}
-                        onDragStart={(e) => {
-                          e.dataTransfer.setData("text/plain", o!.id);
-                          e.dataTransfer.effectAllowed = "move";
-                        }}
-                        onDragOver={(e) => {
-                          if (manage) {
-                            e.preventDefault();
-                            e.dataTransfer.dropEffect = o ? "none" : "move";
-                          }
-                        }}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          if (!manage) return;
-                          const id = e.dataTransfer.getData("text/plain");
-                          if (o) {
-                            fail("A célula de destino já está ocupada.");
-                            return;
-                          }
-                          if (!current.current.objects.some((a) => a.id === id))
-                            return;
-                          update(
-                            {
-                              ...current.current,
-                              objects: current.current.objects.map((a) =>
-                                a.id === id ? { ...a, x, y } : a,
-                              ),
-                            },
-                            "Objeto movido",
-                            true,
-                          );
-                          setSelected(id);
-                        }}
+                        key={i}
+                        style={{ gridColumn: vx, gridRow: vy }}
+                        className="map-tile grid-cell"
+                        aria-label={`Célula vazia, coluna ${x}, linha ${y}`}
                         onClick={() => clickCell(x, y)}
                       >
-                        {o ? (
-                          <>
-                            <ObjectIcon o={o} size={Math.round(24 * zoom)} />
-                            {zoom >= 0.7 && <span>{identifier(o)}</span>}
-                          </>
-                        ) : (
-                          <Plus className="cell-add" size={17} />
-                        )}
+                        <Plus className="cell-add" size={17} />
                       </button>
                     );
                   })}
+                  {room.objects.map((o) => {
+                    return (
+                      <div
+                        key={o.id}
+                        className="map-object"
+                        style={viewArea(o)}
+                      >
+                        <button
+                          className={`grid-cell occupied ${o.color} ${o.id === selected ? "selected" : ""}`}
+                          aria-label={`${identifier(o)}, coluna ${o.x}, linha ${o.y}`}
+                          aria-pressed={o.id === selected}
+                          draggable={manage && !pan}
+                          onDragStart={(e) => {
+                            const point = pointAt(e.clientX, e.clientY);
+                            dragged.current = {
+                              id: o.id,
+                              dx: point.x - o.x,
+                              dy: point.y - o.y,
+                            };
+                            e.dataTransfer.setData("text/plain", o.id);
+                            e.dataTransfer.effectAllowed = "move";
+                          }}
+                          onDragEnd={() => {
+                            dragged.current = null;
+                          }}
+                          onClick={(e) => {
+                            const point =
+                              e.detail > 0 ? pointAt(e.clientX, e.clientY) : o;
+                            clickCell(point.x, point.y);
+                          }}
+                        >
+                          <ObjectIcon
+                            o={o}
+                            size={
+                              zoom < 0.7
+                                ? 15
+                                : Math.min(28, Math.round(23 * zoom))
+                            }
+                          />
+                          {zoom >= 0.7 && <span>{identifier(o)}</span>}
+                        </button>
+                        {zoom < 0.7 && (
+                          <span
+                            aria-hidden="true"
+                            className="compact-object-label"
+                          >
+                            {identifier(o)}
+                          </span>
+                        )}
+                        {manage && o.id === selected && !pan && !move && (
+                          <button
+                            className={`resize-handle corner-${turn}`}
+                            type="button"
+                            title="Arraste para redimensionar"
+                            aria-label="Redimensionar objeto"
+                            onClick={(e) => {
+                              if (e.detail === 0) {
+                                setPanel("attributes");
+                                requestAnimationFrame(() =>
+                                  document
+                                    .getElementById("object-width")
+                                    ?.focus(),
+                                );
+                              }
+                            }}
+                            onPointerDown={(e) => {
+                              if (e.button !== 0) return;
+                              e.stopPropagation();
+                              e.currentTarget.setPointerCapture(e.pointerId);
+                              resizeDrag.current = {
+                                width: o.width ?? 1,
+                                height: o.height ?? 1,
+                              };
+                            }}
+                            onPointerMove={(e) => {
+                              if (!resizeDrag.current) return;
+                              const point = pointAt(e.clientX, e.clientY);
+                              resizeDrag.current = {
+                                width: Math.max(1, point.x - o.x + 1),
+                                height: Math.max(1, point.y - o.y + 1),
+                              };
+                              setSize(resizeDrag.current);
+                            }}
+                            onPointerCancel={() => {
+                              resizeDrag.current = undefined;
+                              setSize(undefined);
+                            }}
+                            onPointerUp={() => {
+                              const next = resizeDrag.current;
+                              resizeDrag.current = undefined;
+                              setSize(undefined);
+                              if (
+                                next &&
+                                (next.width !== (o.width ?? 1) ||
+                                  next.height !== (o.height ?? 1))
+                              )
+                                place(
+                                  { ...o, ...next },
+                                  "Objeto redimensionado",
+                                );
+                            }}
+                          >
+                            <span aria-hidden="true">↘</span>
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {preview && (
+                    <div
+                      aria-hidden="true"
+                      className={`size-preview ${canPlace(preview) ? "" : "invalid-preview"}`}
+                      style={viewArea(preview)}
+                    />
+                  )}
                 </div>
               </div>
             </div>
@@ -617,34 +1066,68 @@ export default function Editor({
               >
                 <Plus size={15} />
               </button>
-              <button aria-label="Restaurar zoom" onClick={() => setZoom(1)}>
-                <Maximize size={14} />
+              <button
+                title="Centralizar e restaurar zoom"
+                aria-label="Centralizar e restaurar zoom"
+                onClick={() => {
+                  if (zoom === 1) centerMap();
+                  else {
+                    centerPending.current = true;
+                    setZoom(1);
+                  }
+                }}
+              >
+                <Crosshair size={16} />
+              </button>
+              <button
+                title="Girar à esquerda"
+                aria-label="Girar à esquerda"
+                disabled={!viewReady}
+                onClick={() => orient((turn + 3) % 4)}
+              >
+                <RotateCcw size={16} />
+              </button>
+              <button
+                title="Restaurar orientação"
+                aria-label="Restaurar orientação"
+                disabled={!viewReady || turn === 0}
+                onClick={() => orient(0)}
+              >
+                {turn * 90}°
+              </button>
+              <button
+                title="Girar à direita"
+                aria-label="Girar à direita"
+                disabled={!viewReady}
+                onClick={() => orient((turn + 1) % 4)}
+              >
+                <RotateCw size={16} />
+              </button>
+              <button
+                title="Mover mapa"
+                aria-label="Mover mapa"
+                aria-pressed={pan}
+                onClick={() => setPan(!pan)}
+              >
+                <Hand size={16} />
+              </button>
+              <button
+                title={fullscreen ? "Sair da tela cheia" : "Tela cheia"}
+                aria-label={fullscreen ? "Sair da tela cheia" : "Tela cheia"}
+                onClick={() => void toggleFullscreen()}
+              >
+                {fullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
               </button>
             </div>
           </footer>
-          <div className="canvas-legend">
-            <span>
-              <span className="legend-cell" />
-              Célula vazia
-            </span>
-            <span>
-              <span className="legend-cell gray" />
-              Cinza
-            </span>
-            <span>
-              <span className="legend-cell green" />
-              Verde
-            </span>
-            <small>Cores definidas pela equipe</small>
-          </div>
         </section>
         <aside
-          className={`properties ${selected || panel === "notes" ? "properties-open" : ""} ${move ? "moving-panel" : ""}`}
+          className={`properties ${selected || panel === "notes" || panel === "room" ? "properties-open" : ""} ${move ? "moving-panel" : ""}`}
         >
           <div className="properties-top">
             <h3>{object ? "Detalhes do objeto" : "Detalhes da sala"}</h3>
             <Button
-              className="mobile-only"
+              className="close-properties"
               variant="ghost"
               size="icon"
               aria-label="Fechar painel"
@@ -656,6 +1139,19 @@ export default function Editor({
               <X size={18} />
             </Button>
           </div>
+          {sharedNotes && (
+            <Button
+              className="shared-notes-action"
+              size="sm"
+              variant={panel === "shared" ? "default" : "outline"}
+              aria-pressed={panel === "shared"}
+              onClick={() =>
+                setPanel(panel === "shared" ? "attributes" : "shared")
+              }
+            >
+              <FileText size={16} /> Notas compartilhadas
+            </Button>
+          )}
           <div className="tabs">
             <button
               className={panel === "attributes" ? "active" : ""}
@@ -675,7 +1171,7 @@ export default function Editor({
             </button>
           </div>
           <div className="properties-scroll">
-            {panel === "attributes" ? (
+            {panel !== "notes" ? (
               object ? (
                 <>
                   <div className="object-summary">
@@ -699,8 +1195,12 @@ export default function Editor({
                   </div>
                   <div className="property-content">
                     <div className="section-heading">
-                      <span className="eyebrow">ATRIBUTOS COMPARTILHADOS</span>
-                      {manage && (
+                      <span className="eyebrow">
+                        {panel === "shared"
+                          ? "Notas do objeto"
+                          : "Atributos compartilhados"}
+                      </span>
+                      {manage && panel === "attributes" && (
                         <Button
                           size="icon"
                           variant="ghost"
@@ -711,105 +1211,115 @@ export default function Editor({
                         </Button>
                       )}
                     </div>
-                    {object.attributes.map((a) => (
-                      <div className="attribute" key={a.id}>
-                        <div className="row between">
-                          <label htmlFor={`attr-${a.id}`}>{a.name}</label>
-                          {!canEditAttribute(w.role, room, userId, a) && (
-                            <Lock size={12} className="muted" />
-                          )}
-                        </div>
-                        <AttributeInput
-                          a={a}
-                          disabled={
-                            !canEditAttribute(w.role, room, userId, a) ||
-                            saveState === "error"
-                          }
-                          onChange={(value) => patchAttr(a, value)}
-                        />
-                        {manage ? (
-                          <div className="attribute-permissions">
-                            <select
-                              aria-label={`Visibilidade de ${a.name}`}
-                              value={a.visibility}
-                              onChange={(e) =>
-                                patchObject(
-                                  (o) => ({
-                                    ...o,
-                                    attributes: o.attributes.map((x) =>
-                                      x.id === a.id
-                                        ? {
-                                            ...x,
-                                            visibility: e.target
-                                              .value as Attribute["visibility"],
-                                          }
-                                        : x,
-                                    ),
-                                  }),
-                                  "Permissão alterada",
-                                )
-                              }
-                            >
-                              <option value="public">Visível: público</option>
-                              <option value="teacher">Visível: docente</option>
-                              <option value="admin">
-                                Visível: administrativo
-                              </option>
-                            </select>
-                            <select
-                              aria-label={`Edição de ${a.name}`}
-                              value={a.edit_role}
-                              onChange={(e) =>
-                                patchObject(
-                                  (o) => ({
-                                    ...o,
-                                    attributes: o.attributes.map((x) =>
-                                      x.id === a.id
-                                        ? {
-                                            ...x,
-                                            edit_role: e.target
-                                              .value as Attribute["edit_role"],
-                                          }
-                                        : x,
-                                    ),
-                                  }),
-                                  "Permissão alterada",
-                                )
-                              }
-                            >
-                              <option value="teacher">Edita: docente</option>
-                              <option value="admin">
-                                Edita: administrador
-                              </option>
-                            </select>
-                            <button
-                              aria-label={`Excluir atributo ${a.name}`}
-                              onClick={() => {
-                                if (confirm(`Excluir o atributo “${a.name}”?`))
+                    {object.attributes
+                      .filter((a) =>
+                        panel === "shared"
+                          ? a.id === sharedNotes?.id
+                          : a.id !== sharedNotes?.id,
+                      )
+                      .map((a) => (
+                        <div className="attribute" key={a.id}>
+                          <div className="row between">
+                            <label htmlFor={`attr-${a.id}`}>{a.name}</label>
+                            {!canEditAttribute(w.role, room, userId, a) && (
+                              <Lock size={12} className="muted" />
+                            )}
+                          </div>
+                          <AttributeInput
+                            a={a}
+                            disabled={
+                              !canEditAttribute(w.role, room, userId, a) ||
+                              saveState === "error"
+                            }
+                            onChange={(value) => patchAttr(a, value)}
+                          />
+                          {manage ? (
+                            <div className="attribute-permissions">
+                              <select
+                                aria-label={`Visibilidade de ${a.name}`}
+                                value={a.visibility}
+                                onChange={(e) =>
                                   patchObject(
                                     (o) => ({
                                       ...o,
-                                      attributes: o.attributes.filter(
-                                        (x) => x.id !== a.id,
+                                      attributes: o.attributes.map((x) =>
+                                        x.id === a.id
+                                          ? {
+                                              ...x,
+                                              visibility: e.target
+                                                .value as Attribute["visibility"],
+                                            }
+                                          : x,
                                       ),
                                     }),
-                                    "Atributo excluído",
-                                  );
-                              }}
-                            >
-                              <X size={13} />
-                            </button>
-                          </div>
-                        ) : (
-                          <small className="tiny muted">
-                            {a.visibility === "public"
-                              ? "Público"
-                              : "Docentes e administradores"}
-                          </small>
-                        )}
-                      </div>
-                    ))}
-                    {manage && (
+                                    "Permissão alterada",
+                                  )
+                                }
+                              >
+                                <option value="public">Visível: público</option>
+                                <option value="teacher">
+                                  Visível: docente
+                                </option>
+                                <option value="admin">
+                                  Visível: administrativo
+                                </option>
+                              </select>
+                              <select
+                                aria-label={`Edição de ${a.name}`}
+                                value={a.edit_role}
+                                onChange={(e) =>
+                                  patchObject(
+                                    (o) => ({
+                                      ...o,
+                                      attributes: o.attributes.map((x) =>
+                                        x.id === a.id
+                                          ? {
+                                              ...x,
+                                              edit_role: e.target
+                                                .value as Attribute["edit_role"],
+                                            }
+                                          : x,
+                                      ),
+                                    }),
+                                    "Permissão alterada",
+                                  )
+                                }
+                              >
+                                <option value="teacher">Edita: docente</option>
+                                <option value="admin">
+                                  Edita: administrador
+                                </option>
+                              </select>
+                              <button
+                                aria-label={`Excluir atributo ${a.name}`}
+                                onClick={() => {
+                                  if (
+                                    confirm(`Excluir o atributo “${a.name}”?`)
+                                  )
+                                    patchObject(
+                                      (o) => ({
+                                        ...o,
+                                        attributes: o.attributes.filter(
+                                          (x) => x.id !== a.id,
+                                        ),
+                                      }),
+                                      "Atributo excluído",
+                                    );
+                                }}
+                              >
+                                <X size={13} />
+                              </button>
+                            </div>
+                          ) : (
+                            <small className="tiny muted">
+                              {a.visibility === "public"
+                                ? "Público"
+                                : "Docentes e administradores"}
+                            </small>
+                          )}
+                        </div>
+                      ))}
+                    {manage && panel === "attributes" && (
                       <>
                         <div className="property-divider" />
                         <label>
@@ -828,25 +1338,97 @@ export default function Editor({
                             ))}
                           </select>
                         </label>
-                        <label>Cor do objeto</label>
-                        <div className="row">
-                          <button
-                            className={`color-choice gray ${object.color === "gray" ? "chosen" : ""}`}
-                            onClick={() =>
-                              patchObject((o) => ({ ...o, color: "gray" }))
+                        <label>
+                          Cor do objeto
+                          <select
+                            value={object.color}
+                            onChange={(e) =>
+                              patchObject((o) => ({
+                                ...o,
+                                color: e.target.value as LabObject["color"],
+                              }))
                             }
                           >
-                            Cinza
-                          </button>
-                          <button
-                            className={`color-choice green ${object.color === "green" ? "chosen" : ""}`}
-                            onClick={() =>
-                              patchObject((o) => ({ ...o, color: "green" }))
-                            }
-                          >
-                            Verde
-                          </button>
-                        </div>
+                            {Object.entries(objectColors).map(([key, name]) => (
+                              <option key={key} value={key}>
+                                {name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={object.color === "gray"}
+                          onClick={() =>
+                            patchObject((o) => ({ ...o, color: "gray" }))
+                          }
+                        >
+                          Restaurar cor padrão
+                        </Button>
+                        <form
+                          className="object-size"
+                          key={`${object.id}:${object.width}:${object.height}`}
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            const data = new FormData(e.currentTarget);
+                            const footprint = {
+                              width: Number(data.get("width")),
+                              height: Number(data.get("height")),
+                            };
+                            if (
+                              place(
+                                { ...object, ...footprint },
+                                "Objeto redimensionado",
+                              )
+                            )
+                              setSize(undefined);
+                          }}
+                          onChange={(e) => {
+                            const data = new FormData(e.currentTarget);
+                            const width = Math.floor(Number(data.get("width"))),
+                              height = Math.floor(Number(data.get("height")));
+                            setSize(
+                              width >= 1 && height >= 1
+                                ? { width, height }
+                                : undefined,
+                            );
+                          }}
+                        >
+                          <div className="row">
+                            <label>
+                              Largura
+                              <input
+                                id="object-width"
+                                name="width"
+                                type="number"
+                                min={1}
+                                max={room.width}
+                                required
+                                defaultValue={object.width ?? 1}
+                              />
+                            </label>
+                            <label>
+                              Altura
+                              <input
+                                name="height"
+                                type="number"
+                                min={1}
+                                max={room.height}
+                                required
+                                defaultValue={object.height ?? 1}
+                              />
+                            </label>
+                          </div>
+                          {size && !canPlace({ ...object, ...size }) && (
+                            <p role="status" className="tiny">
+                              Área ocupada ou fora da grade.
+                            </p>
+                          )}
+                          <Button size="sm" variant="outline">
+                            Aplicar tamanho
+                          </Button>
+                        </form>
                       </>
                     )}
                   </div>
@@ -1315,13 +1897,6 @@ export default function Editor({
       </Dialog>
     </main>
   );
-}
-function rolesLabel(role: string) {
-  return role === "admin"
-    ? "Administrador"
-    : role === "teacher"
-      ? "Docente"
-      : "Público";
 }
 function AttributeInput({
   a,

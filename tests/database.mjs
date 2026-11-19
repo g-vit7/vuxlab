@@ -499,5 +499,92 @@ await test("Perfil permite alterar apenas o próprio nome e o administrador rece
   ).rows.find((m) => m.user_id === teacher);
   assert.equal(member.display_name, "Docente de teste");
 });
+await db.exec("reset role");
+await db.exec(
+  await readFile(
+    new URL(
+      "../supabase/migrations/202611190001_editor_preferences.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+);
+await test("Migração preserva histórico anterior e valida toda a área dos objetos", async () => {
+  await as(admin);
+  const change = (
+    await db.query(
+      "select id from public.change_history where room_id=$1 and result_version=10",
+      [room.id],
+    )
+  ).rows[0].id;
+  await rpc("undo_change", [change]);
+  const large = structuredClone(room);
+  Object.assign(large.objects[0], { width: 2, height: 3, color: "yellow" });
+  assert.equal(await rpc("save_room", [large, 11, "Área ampliada", false]), 12);
+  const conflict = structuredClone(large);
+  Object.assign(conflict.objects[1], { x: 2, y: 2 });
+  await rejects(
+    () => rpc("save_room", [conflict, 12, "Sobreposto", false]),
+    /Objetos sobrepostos/,
+  );
+  Object.assign(conflict.objects[1], { x: 4, y: 23, height: 2 });
+  await rejects(
+    () => rpc("save_room", [conflict, 12, "Fora da grade", false]),
+    /fora dos limites/,
+  );
+  assert.deepEqual(
+    (
+      await db.query(
+        "select width,height,color from public.objects where id=$1",
+        [large.objects[0].id],
+      )
+    ).rows[0],
+    { width: 2, height: 3, color: "yellow" },
+  );
+});
+await test("Orientação é pessoal e só pode ser salva por membros da sala", async () => {
+  await as(admin);
+  const invite = await rpc("create_invite", [w, "public", 1, 1]);
+  await as(pub);
+  await rpc("accept_invite", [invite]);
+  await as(teacher);
+  await db.query(
+    "insert into public.room_view_preferences(room_id,turn) values($1,3)",
+    [room.id],
+  );
+  await as(pub);
+  assert.deepEqual(
+    (await db.query("select turn from public.room_view_preferences")).rows,
+    [],
+  );
+  await db.query(
+    "insert into public.room_view_preferences(room_id,turn) values($1,1)",
+    [room.id],
+  );
+  assert.deepEqual(
+    (await db.query("select turn from public.room_view_preferences")).rows,
+    [{ turn: 1 }],
+  );
+  await as(admin);
+  await rpc("set_member", [w, pub, null]);
+  await as(pub);
+  assert.deepEqual(
+    (
+      await db.query(
+        "update public.room_view_preferences set turn=2 where room_id=$1 returning turn",
+        [room.id],
+      )
+    ).rows,
+    [],
+  );
+  await rejects(
+    () =>
+      db.query(
+        "insert into public.room_view_preferences(room_id,turn) values($1,2)",
+        [room.id],
+      ),
+    /row-level security/,
+  );
+});
 console.log(`\n${count} cenários PostgreSQL/RLS aprovados.`);
 await db.close();

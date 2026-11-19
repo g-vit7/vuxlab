@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import {
   Link,
   Navigate,
@@ -15,8 +21,9 @@ import {
   LayoutGrid,
   Settings,
   LogOut,
-  Sun,
-  Moon,
+  Lock,
+  LockOpen,
+  X,
   Users,
   ArrowLeft,
   Monitor,
@@ -27,7 +34,6 @@ import {
   ChevronRight,
   Search,
   FlaskConical,
-  Menu,
   Copy,
   Trash2,
   NotebookPen,
@@ -45,6 +51,12 @@ import {
   type Role,
   type Member,
 } from "./lib/model";
+import {
+  localAppearance,
+  modes,
+  themes,
+  type Appearance,
+} from "./lib/appearance";
 import Editor from "./features/editor/Editor";
 import WorkspaceNotes from "./components/WorkspaceNotes";
 import PersonalNotes from "./features/notes/PersonalNotes";
@@ -52,22 +64,106 @@ export default function App() {
   const [user, setUser] = useState<{ id: string; email?: string } | null>(null),
     [loading, setLoading] = useState(!!supabase),
     [isDemo, setDemo] = useState(sessionStorage.getItem("vuxlab-demo") === "1");
-  const [dark, setDark] = useState(
-      localStorage.getItem("vuxlab-theme") === "dark",
-    ),
-    [error, setError] = useState(""),
-    [spaces, setSpaces] = useState<Workspace[]>([]),
-    [sidebar, setSidebar] = useState(false);
+  const [appearance, setAppearance] = useState(localAppearance);
+  const [appearanceBusy, setAppearanceBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [spaces, setSpaces] = useState<Workspace[]>([]);
+  const [sidebar, setSidebar] = useState(
+    () => window.innerWidth >= 1200 && window.innerHeight >= 720,
+  );
+  const [freeSidebar, setFreeSidebar] = useState(
+    () => localStorage.getItem("vuxlab-sidebar") === "free",
+  );
   const [displayName, setDisplayName] = useState("");
   const navigate = useNavigate(),
     location = useLocation();
   const service = useMemo(() => api(isDemo), [isDemo]);
   const activeId = location.pathname.split("/")[2];
   const active = spaces.find((w) => w.id === activeId);
+  const userId = isDemo ? DEMO_USER : (user?.id ?? "");
+  const inEditor = /^\/w\/[^/]+\/sala\/[^/]+/.test(location.pathname);
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", dark);
-    localStorage.setItem("vuxlab-theme", dark ? "dark" : "light");
-  }, [dark]);
+    const system = matchMedia("(prefers-color-scheme: dark)");
+    function apply() {
+      document.documentElement.dataset.theme = appearance.theme;
+      document.documentElement.classList.toggle(
+        "dark",
+        appearance.mode === "dark" ||
+          (appearance.mode === "system" && system.matches),
+      );
+    }
+    apply();
+    system.addEventListener("change", apply);
+    return () => system.removeEventListener("change", apply);
+  }, [appearance]);
+  useEffect(() => {
+    if (!user && !isDemo) return;
+    let active = true;
+    setAppearanceBusy(true);
+    service
+      .appearance(userId)
+      .then((value) => {
+        if (active) setAppearance(value);
+      })
+      .catch((error) => {
+        if (active) setError(message(error));
+      })
+      .finally(() => {
+        if (active) setAppearanceBusy(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user?.id, isDemo, service]);
+  async function changeAppearance(next: Appearance) {
+    setAppearanceBusy(true);
+    try {
+      await service.saveAppearance(userId, next);
+      setAppearance(next);
+    } catch (error) {
+      setError(message(error));
+    } finally {
+      setAppearanceBusy(false);
+    }
+  }
+  const menuControls = (
+    <div className="row nav-controls">
+      <Button
+        size="icon"
+        variant="ghost"
+        aria-controls="main-sidebar"
+        aria-expanded={sidebar}
+        aria-label={sidebar ? "Recolher menu" : "Abrir menu"}
+        onClick={() => setSidebar(!sidebar)}
+      >
+        <ChevronRight
+          className={sidebar ? "sidebar-arrow-open" : ""}
+          size={19}
+        />
+      </Button>
+      <Button
+        size="icon"
+        variant="ghost"
+        aria-pressed={freeSidebar}
+        title={freeSidebar ? "Modo Livre" : "Modo Travado"}
+        aria-label={
+          freeSidebar
+            ? "Modo Livre. Ativar Modo Travado"
+            : "Modo Travado. Ativar Modo Livre"
+        }
+        onClick={() => {
+          localStorage.setItem(
+            "vuxlab-sidebar",
+            freeSidebar ? "locked" : "free",
+          );
+          if (!freeSidebar) setSidebar(false);
+          setFreeSidebar(!freeSidebar);
+        }}
+      >
+        {freeSidebar ? <LockOpen size={16} /> : <Lock size={16} />}
+      </Button>
+    </div>
+  );
   useEffect(() => {
     if (!supabase) return;
     supabase.auth.getSession().then(({ data, error }) => {
@@ -129,11 +225,51 @@ export default function App() {
       />
     );
   return (
-    <div className="shell">
+    <div
+      className={`shell ${inEditor ? "room-shell" : ""} ${freeSidebar ? "sidebar-free" : ""} ${sidebar ? "sidebar-expanded" : ""}`}
+    >
+      {freeSidebar && !sidebar && (
+        <div
+          className="sidebar-edge"
+          aria-hidden="true"
+          onPointerEnter={(event) => {
+            if (event.pointerType === "mouse") setSidebar(true);
+          }}
+        />
+      )}
       {sidebar && (
         <div className="sidebar-backdrop" onClick={() => setSidebar(false)} />
       )}
-      <aside className={`sidebar ${sidebar ? "is-open" : ""}`}>
+      <aside
+        id="main-sidebar"
+        className={`sidebar ${sidebar ? "is-open" : ""}`}
+        inert={!sidebar}
+        onPointerLeave={(event) => {
+          if (
+            freeSidebar &&
+            event.pointerType === "mouse" &&
+            !event.currentTarget.contains(document.activeElement)
+          )
+            setSidebar(false);
+        }}
+        onBlur={(event) => {
+          if (
+            freeSidebar &&
+            !event.currentTarget.contains(event.relatedTarget) &&
+            !event.currentTarget.matches(":hover")
+          )
+            setSidebar(false);
+        }}
+      >
+        <Button
+          className="sidebar-dismiss"
+          size="icon"
+          variant="ghost"
+          aria-label="Recolher navegação"
+          onClick={() => setSidebar(false)}
+        >
+          <X size={16} />
+        </Button>
         <Link className="brand" to="/">
           <div className="brand-mark">
             <Boxes size={25} />
@@ -215,17 +351,9 @@ export default function App() {
         </div>
       </aside>
       <div className="main-shell">
-        <header className="topbar">
+        <header className="topbar" hidden={inEditor}>
           <div className="row">
-            <Button
-              size="icon"
-              variant="ghost"
-              className="mobile-only"
-              onClick={() => setSidebar(!sidebar)}
-              aria-label="Abrir menu"
-            >
-              <Menu size={20} />
-            </Button>
+            {menuControls}
             <span className="muted">Meu ambiente</span>
             {active && (
               <>
@@ -238,14 +366,6 @@ export default function App() {
             {isDemo && (
               <span className="badge demo-badge">Demonstração local</span>
             )}
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={dark ? "Usar tema claro" : "Usar tema escuro"}
-              onClick={() => setDark(!dark)}
-            >
-              {dark ? <Sun size={18} /> : <Moon size={18} />}
-            </Button>
             <span className="avatar small">
               {(displayName?.[0] || user?.email?.[0] || "V").toUpperCase()}
             </span>
@@ -282,6 +402,7 @@ export default function App() {
                   fail={setError}
                   isDemo={isDemo}
                   refreshSpaces={refresh}
+                  menuControls={menuControls}
                 />
               ) : (
                 <div className="page empty">
@@ -326,6 +447,9 @@ export default function App() {
                 service={service}
                 displayName={displayName}
                 onNameChange={setDisplayName}
+                appearance={appearance}
+                appearanceBusy={appearanceBusy}
+                onAppearanceChange={changeAppearance}
               />
             }
           />
@@ -627,6 +751,7 @@ function WorkspaceList({
 }
 function WorkspacePage({
   workspace: w,
+  menuControls,
   service,
   userId,
   fail,
@@ -634,6 +759,7 @@ function WorkspacePage({
   refreshSpaces,
 }: {
   workspace: Workspace;
+  menuControls: ReactNode;
   service: Api;
   userId: string;
   fail: (s: string) => void;
@@ -693,6 +819,7 @@ function WorkspacePage({
         service={service}
         fail={fail}
         onReload={refresh}
+        menuControls={menuControls}
       />
     ) : (
       <div className="page empty">
@@ -1214,10 +1341,16 @@ function Account({
   service,
   displayName,
   onNameChange,
+  appearance,
+  appearanceBusy,
+  onAppearanceChange,
 }: {
   service: Api;
   displayName: string;
   onNameChange: (name: string) => void;
+  appearance: Appearance;
+  appearanceBusy: boolean;
+  onAppearanceChange: (next: Appearance) => Promise<void>;
   isDemo: boolean;
   email?: string;
   fail: (s: string) => void;
@@ -1274,6 +1407,47 @@ function Account({
             {profileInfo}
           </p>
         )}
+      </section>
+      <section className="panel">
+        <h3>Aparência</h3>
+        <label>
+          Tema
+          <select
+            value={appearance.theme}
+            disabled={appearanceBusy}
+            onChange={(e) =>
+              void onAppearanceChange({
+                ...appearance,
+                theme: e.target.value as Appearance["theme"],
+              })
+            }
+          >
+            {Object.entries(themes).map(([key, name]) => (
+              <option key={key} value={key}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Modo de exibição
+          <select
+            value={appearance.mode}
+            disabled={appearanceBusy}
+            onChange={(e) =>
+              void onAppearanceChange({
+                ...appearance,
+                mode: e.target.value as Appearance["mode"],
+              })
+            }
+          >
+            {Object.entries(modes).map(([key, name]) => (
+              <option key={key} value={key}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
       </section>
       <section className="panel">
         <h3>Seu acesso</h3>

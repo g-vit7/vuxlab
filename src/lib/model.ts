@@ -26,13 +26,26 @@ export const attributeSchema = z
         message: "Valor incompatível com o tipo",
       });
   });
+export const objectColors = {
+  gray: "Cinza",
+  green: "Verde",
+  yellow: "Amarelo",
+  red: "Vermelho",
+  blue: "Azul",
+  purple: "Roxo",
+} as const;
+const objectColorsKeys = Object.keys(
+  objectColors,
+) as (keyof typeof objectColors)[];
 export const objectSchema = z.object({
   id: z.string(),
   kind: z.enum(["master", "pc", "door", "other"]),
   icon: z.string().max(80),
   x: z.number().int().positive(),
   y: z.number().int().positive(),
-  color: z.enum(["gray", "green"]),
+  color: z.enum(objectColorsKeys),
+  width: z.number().int().min(1).max(100).optional(),
+  height: z.number().int().min(1).max(100).optional(),
   attributes: z.array(attributeSchema).max(100),
 });
 export const roomSchema = z
@@ -45,13 +58,16 @@ export const roomSchema = z
   .superRefine((r, ctx) => {
     const cells = new Set<string>();
     for (const o of r.objects) {
-      const k = `${o.x},${o.y}`;
-      if (o.x > r.width || o.y > r.height || cells.has(k))
+      const footprint = objectCells(o);
+      if (
+        !fitsRoom(o, r.width, r.height) ||
+        footprint.some((k) => cells.has(k))
+      )
         ctx.addIssue({
           code: "custom",
-          message: "Coordenadas fora da sala ou sobrepostas",
+          message: "Objeto fora da sala ou sobreposto",
         });
-      cells.add(k);
+      footprint.forEach((k) => cells.add(k));
     }
     if (new Set(r.objects.map((o) => o.id)).size !== r.objects.length)
       ctx.addIssue({ code: "custom", message: "Identificadores duplicados" });
@@ -144,6 +160,21 @@ export function freshObject(
     ],
   };
 }
+export function objectCells(o: LabObject) {
+  const width = o.width ?? 1;
+  return Array.from(
+    { length: width * (o.height ?? 1) },
+    (_, i) => `${o.x + (i % width)}:${o.y + Math.floor(i / width)}`,
+  );
+}
+export function fitsRoom(o: LabObject, width: number, height: number) {
+  return (
+    o.x >= 1 &&
+    o.y >= 1 &&
+    o.x + (o.width ?? 1) - 1 <= width &&
+    o.y + (o.height ?? 1) - 1 <= height
+  );
+}
 export function resizeRoom(
   r: Room,
   width: number,
@@ -158,13 +189,9 @@ export function resizeRoom(
       ...r,
       width,
       height,
-      objects: moved.filter(
-        (o) => o.x >= 1 && o.y >= 1 && o.x <= width && o.y <= height,
-      ),
+      objects: moved.filter((o) => fitsRoom(o, width, height)),
     },
-    removed: moved.filter(
-      (o) => o.x < 1 || o.y < 1 || o.x > width || o.y > height,
-    ),
+    removed: moved.filter((o) => !fitsRoom(o, width, height)),
   };
 }
 export function canManageRoom(role: Role, r: Room, user: string) {
