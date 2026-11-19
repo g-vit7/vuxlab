@@ -498,7 +498,8 @@ function Auth({
       location.hash.includes("type=recovery") ? "password" : "login",
     ),
     [busy, setBusy] = useState(false),
-    [info, setInfo] = useState("");
+    [info, setInfo] = useState(""),
+    [passwordMismatch, setPasswordMismatch] = useState(false);
   useEffect(() => {
     if (!supabase) return;
     const { data } = supabase.auth.onAuthStateChange((e) => {
@@ -508,16 +509,30 @@ function Auth({
   }, []);
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setBusy(true);
+    const form = e.currentTarget;
+    const f = new FormData(form);
+    const email = String(f.get("email") ?? "").trim();
+    const password = String(f.get("password") ?? "");
+    const displayName = String(f.get("display_name") ?? "").trim();
     setInfo("");
-    const f = new FormData(e.currentTarget);
+    if (mode === "signup") {
+      if (!displayName) {
+        setInfo("Informe seu nome de exibição.");
+        document.getElementById("auth-display-name")?.focus();
+        return;
+      }
+      if (password !== f.get("password_confirmation")) {
+        setPasswordMismatch(true);
+        document.getElementById("auth-password-confirmation")?.focus();
+        return;
+      }
+    }
+    setBusy(true);
     try {
       if (!supabase)
         throw Error(
           "Supabase não configurado. Você pode explorar a demonstração abaixo.",
         );
-      const email = String(f.get("email") || ""),
-        password = String(f.get("password") || "");
       let result;
       if (mode === "login")
         result = await supabase.auth.signInWithPassword({ email, password });
@@ -525,7 +540,10 @@ function Auth({
         result = await supabase.auth.signUp({
           email,
           password,
-          options: { emailRedirectTo: location.origin },
+          options: {
+            emailRedirectTo: location.origin,
+            data: { display_name: displayName },
+          },
         });
       else if (mode === "reset")
         result = await supabase.auth.resetPasswordForEmail(email, {
@@ -594,23 +612,43 @@ function Auth({
               ? "Seu próximo espaço começa aqui."
               : "Entre para acessar seus Workspaces."}
           </p>
-          <form onSubmit={submit}>
+          <form
+            onSubmit={submit}
+            onChange={() => {
+              if (passwordMismatch) setPasswordMismatch(false);
+            }}
+          >
+            {mode === "signup" && (
+              <label htmlFor="auth-display-name">
+                Nome de exibição
+                <input
+                  id="auth-display-name"
+                  name="display_name"
+                  autoComplete="nickname"
+                  maxLength={100}
+                  required
+                  placeholder="Como você quer ser chamado?"
+                />
+              </label>
+            )}
             {mode !== "password" && (
-              <label>
+              <label htmlFor="auth-email">
                 E-mail
                 <input
+                  id="auth-email"
                   name="email"
                   type="email"
                   required
                   placeholder="voce@escola.edu.br"
-                  autoComplete="email"
+                  autoComplete={mode === "login" ? "username" : "email"}
                 />
               </label>
             )}
             {mode !== "reset" && (
-              <label>
+              <label htmlFor="auth-password">
                 Senha
                 <input
+                  id="auth-password"
                   name="password"
                   type="password"
                   required
@@ -620,6 +658,31 @@ function Auth({
                   }
                   placeholder="Pelo menos 8 caracteres"
                 />
+              </label>
+            )}
+            {mode === "signup" && (
+              <label htmlFor="auth-password-confirmation">
+                Confirme a senha
+                <input
+                  id="auth-password-confirmation"
+                  name="password_confirmation"
+                  type="password"
+                  autoComplete="new-password"
+                  required
+                  aria-invalid={passwordMismatch || undefined}
+                  aria-describedby={
+                    passwordMismatch ? "auth-password-mismatch" : undefined
+                  }
+                />
+                {passwordMismatch && (
+                  <span
+                    id="auth-password-mismatch"
+                    role="alert"
+                    className="danger-text"
+                  >
+                    As senhas precisam ser iguais.
+                  </span>
+                )}
               </label>
             )}
             {info && (
@@ -917,6 +980,7 @@ function WorkspacePage({
           <div className="search">
             <Search size={16} />
             <input
+              name="room_search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Buscar sala"
@@ -1172,6 +1236,7 @@ function Members({
               <small>{roles[m.role]}</small>
             </div>
             <select
+              name={`member-role-${m.user_id}`}
               aria-label={`Papel de ${m.user_id}`}
               value={m.role}
               disabled={isDemo}
@@ -1278,7 +1343,12 @@ function Members({
         {link && (
           <div className="notice">
             <p>Copie agora. O token não poderá ser consultado novamente.</p>
-            <input readOnly value={link} aria-label="Link de convite" />
+            <input
+              name="invite_link"
+              readOnly
+              value={link}
+              aria-label="Link de convite"
+            />
             <Button
               variant="outline"
               onClick={async () => {
@@ -1422,6 +1492,7 @@ function Account({
           <label>
             Nome de usuário
             <input
+              name="display_name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required

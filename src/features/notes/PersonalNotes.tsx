@@ -133,6 +133,7 @@ export default function PersonalNotes({
         <div className="search">
           <Search size={16} />
           <input
+            name="note_search"
             aria-label="Buscar nas minhas notas"
             placeholder="Buscar nas notas ou no local…"
             value={query}
@@ -140,6 +141,7 @@ export default function PersonalNotes({
           />
         </div>
         <select
+          name="workspace_filter"
           aria-label="Filtrar notas por Workspace"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
@@ -250,6 +252,7 @@ export default function PersonalNotes({
                 Workspace
                 <select
                   required
+                  name="workspace"
                   value={wid}
                   onChange={(e) => {
                     setWid(e.target.value);
@@ -268,6 +271,7 @@ export default function PersonalNotes({
               <label>
                 Sala
                 <select
+                  name="room"
                   value={rid}
                   onChange={(e) => {
                     setRid(e.target.value);
@@ -287,7 +291,11 @@ export default function PersonalNotes({
               {rid && (
                 <label>
                   Objeto
-                  <select value={oid} onChange={(e) => setOid(e.target.value)}>
+                  <select
+                    name="object"
+                    value={oid}
+                    onChange={(e) => setOid(e.target.value)}
+                  >
                     <option value="">Nota da sala</option>
                     {rooms
                       .find((r) => r.id === rid)
@@ -306,6 +314,7 @@ export default function PersonalNotes({
             <textarea
               autoFocus
               required
+              name="body"
               value={text}
               onChange={(e) => setText(e.target.value)}
               maxLength={20000}

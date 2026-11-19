@@ -1291,7 +1291,7 @@ textarea {
 .attribute {
   margin-bottom: 17px;
 }
-.attribute label {
+.attribute :is(label, .attribute-label) {
   margin-bottom: 0;
   font-size: 10px;
 }

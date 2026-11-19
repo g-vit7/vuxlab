@@ -19,6 +19,7 @@ export function AppearanceFields({
       <label>
         Tema
         <select
+          name="theme"
           value={appearance.theme}
           aria-disabled={busy}
           onChange={(event) => {
@@ -42,6 +43,7 @@ export function AppearanceFields({
       <label>
         Modo
         <select
+          name="display_mode"
           value={appearance.mode}
           aria-disabled={busy}
           onChange={(event) => {

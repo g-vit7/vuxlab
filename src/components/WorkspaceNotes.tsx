@@ -105,6 +105,7 @@ export default function WorkspaceNotes({
           <label>
             {id ? "Editar nota" : "Nova nota"}
             <textarea
+              name="body"
               required
               maxLength={20000}
               value={text}

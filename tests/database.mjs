@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 const db = new PGlite();
 let count = 0;
 await db.exec(
-  `create role anon;create role authenticated;create schema auth;create table auth.users(id uuid primary key,email text);create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;grant usage on schema auth to authenticated;grant execute on function auth.uid() to authenticated;`,
+  `create role anon;create role authenticated;create schema auth;create table auth.users(id uuid primary key,email text,raw_user_meta_data jsonb);create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;grant usage on schema auth to authenticated;grant execute on function auth.uid() to authenticated;`,
 );
 await db.exec(
   await readFile(
@@ -584,6 +584,47 @@ await test("Orientação é pessoal e só pode ser salva por membros da sala", a
         [room.id],
       ),
     /row-level security/,
+  );
+});
+await db.exec("reset role");
+await db.exec(
+  await readFile(
+    new URL(
+      "../supabase/migrations/202611190002_signup_display_name.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+);
+await test("Cadastro cria perfil a partir de um nome válido e aceita contas sem nome", async () => {
+  const signedUp = randomUUID(),
+    blank = randomUUID(),
+    invalid = randomUUID();
+  await db.query(
+    "insert into auth.users(id,raw_user_meta_data) values($1,$2),($3,$4),($5,$6)",
+    [
+      signedUp,
+      { display_name: "  Ada  " },
+      blank,
+      { display_name: " " },
+      invalid,
+      { display_name: ["Ada"] },
+    ],
+  );
+  await as(signedUp);
+  assert.deepEqual(
+    (await db.query("select display_name from public.profiles")).rows,
+    [{ display_name: "Ada" }],
+  );
+  await as(blank);
+  assert.deepEqual(
+    (await db.query("select display_name from public.profiles")).rows,
+    [],
+  );
+  await as(invalid);
+  assert.deepEqual(
+    (await db.query("select display_name from public.profiles")).rows,
+    [],
   );
 });
 console.log(`\n${count} cenários PostgreSQL/RLS aprovados.`);

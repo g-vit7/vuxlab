@@ -1221,7 +1221,16 @@ export default function Editor({
                       .map((a) => (
                         <div className="attribute" key={a.id}>
                           <div className="row between">
-                            <label htmlFor={`attr-${a.id}`}>{a.name}</label>
+                            {a.type === "list" ? (
+                              <span
+                                className="attribute-label"
+                                id={`attr-${a.id}-label`}
+                              >
+                                {a.name}
+                              </span>
+                            ) : (
+                              <label htmlFor={`attr-${a.id}`}>{a.name}</label>
+                            )}
                             {!canEditAttribute(w.role, room, userId, a) && (
                               <Lock size={12} className="muted" />
                             )}
@@ -1237,6 +1246,7 @@ export default function Editor({
                           {manage ? (
                             <div className="attribute-permissions">
                               <select
+                                name={`attr-${a.id}-visibility`}
                                 aria-label={`Visibilidade de ${a.name}`}
                                 value={a.visibility}
                                 onChange={(e) =>
@@ -1266,6 +1276,7 @@ export default function Editor({
                                 </option>
                               </select>
                               <select
+                                name={`attr-${a.id}-edit-role`}
                                 aria-label={`Edição de ${a.name}`}
                                 value={a.edit_role}
                                 onChange={(e) =>
@@ -1326,6 +1337,7 @@ export default function Editor({
                         <label>
                           Ícone
                           <select
+                            name="object_icon"
                             value={object.icon}
                             onChange={(e) =>
                               patchObject((o) => ({
@@ -1342,6 +1354,7 @@ export default function Editor({
                         <label>
                           Cor do objeto
                           <select
+                            name="object_color"
                             value={object.color}
                             onChange={(e) =>
                               patchObject((o) => ({
@@ -1484,6 +1497,7 @@ export default function Editor({
                 <label>
                   Vincular nota a
                   <select
+                    name="note_scope"
                     value={noteScope}
                     onChange={(e) => {
                       setNoteScope(e.target.value as typeof noteScope);
@@ -1533,6 +1547,7 @@ export default function Editor({
                 <label>
                   {noteId ? "Editar nota" : "Nova nota"}
                   <textarea
+                    name="note_text"
                     value={noteText}
                     onChange={(e) => setNoteText(e.target.value)}
                     maxLength={20000}
@@ -1926,7 +1941,11 @@ function AttributeInput({
     const setItem = (i: number, v: Attribute["value"]) =>
       onChange(items.map((item, n) => (n === i ? v : item)));
     return (
-      <div className="list-attribute" id={`attr-${a.id}`} aria-label={a.name}>
+      <div
+        className="list-attribute"
+        role="group"
+        aria-labelledby={`attr-${a.id}-label`}
+      >
         {items.length === 0 && <p className="tiny muted">Nenhum registro.</p>}
         {items.map((item, i) => (
           <div className="list-item" key={i}>
@@ -1938,6 +1957,7 @@ function AttributeInput({
                   <label key={k}>
                     {k === "nome" ? "Nome" : k === "turma" ? "Turma" : k}
                     <input
+                      name={`attr-${a.id}-item-${i}-${k}`}
                       aria-label={`${a.name}, registro ${i + 1}, ${k}`}
                       disabled={disabled || typeof v === "object"}
                       type={typeof v === "number" ? "number" : "text"}
@@ -1962,6 +1982,7 @@ function AttributeInput({
                 ))
               ) : (
                 <input
+                  name={`attr-${a.id}-item-${i}`}
                   aria-label={`${a.name}, item ${i + 1}`}
                   disabled={disabled || typeof item === "object"}
                   value={
