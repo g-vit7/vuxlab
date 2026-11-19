@@ -5,7 +5,16 @@ import {
   type Appearance,
 } from "./appearance";
 import { demo } from "./demo";
-import type { Room, Workspace, Note, Member, History, Role } from "./model";
+import type {
+  Room,
+  Workspace,
+  Note,
+  NoteDraft,
+  NoteVisibility,
+  Member,
+  History,
+  Role,
+} from "./model";
 export function api(isDemo: boolean) {
   const db = supabase;
   async function rpc(name: string, args: Record<string, unknown> = {}) {
@@ -108,23 +117,24 @@ export function api(isDemo: boolean) {
         .upsert({ id: user.id, display_name: clean });
       if (error) throw error;
     },
-    async allNotes(): Promise<Note[]> {
-      if (isDemo) {
-        const ws = await demo.workspaces();
-        return (await Promise.all(ws.map((w) => demo.notes(w.id)))).flat();
-      }
+    async listNotes(
+      visibility: NoteVisibility,
+      workspaceId?: string,
+    ): Promise<Note[]> {
+      if (isDemo) return demo.notes(visibility, workspaceId);
+      const table =
+        visibility === "personal" ? "private_notes" : "shared_notes";
       const notes: Note[] = [];
-      for (let offset = 0; ; offset += 1000) {
-        const { data, error } = await db!
-          .from("private_notes")
-          .select("*")
+      for (let offset = 0; ; offset += 500) {
+        let query = db!.from(table).select("*");
+        if (workspaceId) query = query.eq("workspace_id", workspaceId);
+        const { data, error } = await query
           .order("id")
-          .range(offset, offset + 999);
+          .range(offset, offset + 499);
         if (error) throw error;
         notes.push(...(data || []));
-        if (!data || data.length < 1000) break;
+        if (!data || data.length < 500) return notes;
       }
-      return notes;
     },
     async workspaces(): Promise<Workspace[]> {
       if (isDemo) return demo.workspaces();
@@ -193,18 +203,40 @@ export function api(isDemo: boolean) {
           ),
     undo: (id: string) =>
       isDemo ? demo.undo(id) : rpc("undo_change", { p_id: id }),
-    notes: (w: string): Promise<Note[]> =>
-      isDemo ? demo.notes(w) : rows("private_notes", w),
-    async saveNote(n: Omit<Note, "id" | "author_id">, id?: string) {
-      if (isDemo) return demo.saveNote(n, id);
-      const { error } = await db!
-        .from("private_notes")
-        .upsert({ ...n, ...(id ? { id } : {}) });
+    async saveNote(visibility: NoteVisibility, draft: NoteDraft, id?: string) {
+      if (isDemo) return demo.saveNote(visibility, draft, id);
+      const table = db!.from(
+        visibility === "personal" ? "private_notes" : "shared_notes",
+      );
+      const { title, body, category, noted_at } = draft;
+      const query = id
+        ? table.update({ title, body, category, noted_at }).eq("id", id)
+        : table.insert(draft);
+      const { error } = await query.select("id").single();
       if (error) throw error;
     },
-    async deleteNote(id: string) {
-      if (isDemo) return demo.deleteNote(id);
-      const { error } = await db!.from("private_notes").delete().eq("id", id);
+    async setNoteResolved(
+      visibility: NoteVisibility,
+      id: string,
+      resolved: boolean,
+    ) {
+      if (isDemo) return demo.setNoteResolved(visibility, id, resolved);
+      const { error } = await db!
+        .from(visibility === "personal" ? "private_notes" : "shared_notes")
+        .update({ resolved })
+        .eq("id", id)
+        .select("id")
+        .single();
+      if (error) throw error;
+    },
+    async deleteNote(visibility: NoteVisibility, id: string) {
+      if (isDemo) return demo.deleteNote(visibility, id);
+      const { error } = await db!
+        .from(visibility === "personal" ? "private_notes" : "shared_notes")
+        .delete()
+        .eq("id", id)
+        .select("id")
+        .single();
       if (error) throw error;
     },
     members: (w: string): Promise<Member[]> =>

@@ -40,7 +40,7 @@ import {
 } from "lucide-react";
 import { Button } from "./components/ui/button";
 import { Dialog } from "./components/ui/dialog";
-import { supabase } from "./lib/supabase";
+import { signIn, signOut, supabase } from "./lib/supabase";
 import { api, type Api } from "./lib/api";
 import { DEMO_USER } from "./lib/demo";
 import {
@@ -61,7 +61,6 @@ import {
   AppearanceShortcut,
 } from "./components/AppearanceControls";
 import Editor from "./features/editor/Editor";
-import WorkspaceNotes from "./components/WorkspaceNotes";
 import PersonalNotes from "./features/notes/PersonalNotes";
 export default function App() {
   const [user, setUser] = useState<{ id: string; email?: string } | null>(null),
@@ -342,7 +341,7 @@ export default function App() {
               onClick={() => setSidebar(false)}
             >
               <NotebookPen size={18} />
-              Minhas notas
+              Notas
             </Link>
             <Link
               to="/conta"
@@ -358,7 +357,14 @@ export default function App() {
                 if (isDemo) {
                   sessionStorage.removeItem("vuxlab-demo");
                   setDemo(false);
-                } else await supabase!.auth.signOut();
+                } else {
+                  try {
+                    await signOut();
+                  } catch (error) {
+                    setError(message(error));
+                    return;
+                  }
+                }
                 navigate("/");
               }}
             >
@@ -430,6 +436,7 @@ export default function App() {
                   workspace={active}
                   service={service}
                   userId={isDemo ? DEMO_USER : user!.id}
+                  displayName={displayName}
                   fail={setError}
                   isDemo={isDemo}
                   refreshSpaces={refresh}
@@ -464,6 +471,8 @@ export default function App() {
               <PersonalNotes
                 service={service}
                 spaces={spaces}
+                userId={userId}
+                displayName={displayName}
                 fail={setError}
               />
             }
@@ -541,7 +550,11 @@ function Auth({
         );
       let result;
       if (mode === "login")
-        result = await supabase.auth.signInWithPassword({ email, password });
+        result = await signIn(
+          email,
+          password,
+          f.get("remember_session") === "on",
+        );
       else if (mode === "signup")
         result = await supabase.auth.signUp({
           email,
@@ -664,6 +677,12 @@ function Auth({
                   }
                   placeholder="Pelo menos 8 caracteres"
                 />
+              </label>
+            )}
+            {mode === "login" && (
+              <label className="checkbox-label remember-session">
+                <input type="checkbox" name="remember_session" />
+                Manter conectado neste navegador
               </label>
             )}
             {mode === "signup" && (
@@ -855,6 +874,7 @@ function WorkspacePage({
   appearanceShortcut,
   service,
   userId,
+  displayName,
   fail,
   isDemo,
   refreshSpaces,
@@ -863,6 +883,7 @@ function WorkspacePage({
   appearanceShortcut: ReactNode;
   service: Api;
   userId: string;
+  displayName: string;
   fail: (s: string) => void;
   isDemo: boolean;
   refreshSpaces: () => Promise<void>;
@@ -917,6 +938,7 @@ function WorkspacePage({
         room={room}
         workspace={w}
         userId={userId}
+        displayName={displayName}
         service={service}
         fail={fail}
         onReload={refresh}
@@ -961,7 +983,11 @@ function WorkspacePage({
           </p>
         </div>
         <div className="row wrap">
-          <WorkspaceNotes workspaceId={w.id} service={service} fail={fail} />
+          <Button variant="outline" asChild>
+            <Link to={`/notas?workspace=${w.id}`}>
+              <NotebookPen size={16} /> Notas
+            </Link>
+          </Button>
           {w.role === "admin" && (
             <Button variant="outline" asChild>
               <Link to={`/w/${w.id}/membros`}>
