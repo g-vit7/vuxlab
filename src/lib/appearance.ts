@@ -24,3 +24,8 @@ export function localAppearance(): Appearance {
     mode: Object.hasOwn(modes, mode) ? (mode as Appearance["mode"]) : "system",
   };
 }
+
+export function saveLocalAppearance(appearance: Appearance) {
+  localStorage.setItem("vuxlab-palette", appearance.theme);
+  localStorage.setItem("vuxlab-theme", appearance.mode);
+}

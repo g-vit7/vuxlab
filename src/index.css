@@ -2709,3 +2709,57 @@ textarea {
     padding-inline: 8px;
   }
 }
+
+/* The login illustration uses the same palette as the rest of the app. */
+.auth-appearance {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 18px;
+}
+.auth-appearance .appearance-shortcut {
+  z-index: 10;
+}
+:root[data-theme]:not([data-theme="default"]) .auth-story {
+  background: var(--nav-bg);
+  color: var(--nav-ink);
+}
+:root[data-theme]:not([data-theme="default"])
+  .auth-story
+  :is(.brand, .eyebrow.light, p, small, .auth-grid > div) {
+  color: var(--nav-ink);
+}
+:root[data-theme]:not([data-theme="default"]) .auth-grid > div {
+  border-color: color-mix(in srgb, var(--nav-ink) 46%, var(--nav-bg));
+  background: color-mix(in srgb, var(--nav-ink) 8%, var(--nav-bg));
+}
+:root[data-theme]:not([data-theme="default"]) .auth-grid > div.lit {
+  border-color: var(--nav-ink);
+  background: color-mix(in srgb, var(--nav-ink) 22%, var(--nav-bg));
+}
+:root[data-theme]:not([data-theme="default"])
+  .sidebar
+  :is(.profile, .sidebar-tip) {
+  border-color: color-mix(in srgb, var(--nav-ink) 35%, var(--nav-bg));
+}
+:root[data-theme]:not([data-theme="default"])
+  .sidebar
+  :is(.profile strong, .sidebar-tip strong, .sidebar-tip svg) {
+  color: var(--nav-ink);
+}
+:root[data-theme]:not([data-theme="default"]) .mini-cell {
+  border-color: var(--line);
+}
+:root[data-theme]:not([data-theme="default"]) .mini-cell.gray {
+  color: var(--muted);
+  background: var(--surface-alt);
+}
+:root[data-theme]:not([data-theme="default"]) .mini-cell.filled:not(.gray) {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 18%, var(--surface));
+}
+:root[data-theme]:not([data-theme="default"]) .btn-primary {
+  box-shadow: 0 3px 7px color-mix(in srgb, var(--blue) 20%, transparent);
+}
+:root[data-theme]:not([data-theme="default"]) .btn-primary:hover {
+  background: color-mix(in srgb, var(--blue) 88%, var(--text));
+}

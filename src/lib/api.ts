@@ -1,5 +1,9 @@
 import { supabase } from "./supabase";
-import { localAppearance, type Appearance } from "./appearance";
+import {
+  localAppearance,
+  saveLocalAppearance,
+  type Appearance,
+} from "./appearance";
 import { demo } from "./demo";
 import type { Room, Workspace, Note, Member, History, Role } from "./model";
 export function api(isDemo: boolean) {
@@ -34,11 +38,7 @@ export function api(isDemo: boolean) {
       };
     },
     async saveAppearance(userId: string, appearance: Appearance) {
-      if (isDemo) {
-        localStorage.setItem("vuxlab-palette", appearance.theme);
-        localStorage.setItem("vuxlab-theme", appearance.mode);
-        return;
-      }
+      if (isDemo) return saveLocalAppearance(appearance);
       const { error } = await db!.from("profiles").upsert({
         id: userId,
         editor_theme: appearance.theme,

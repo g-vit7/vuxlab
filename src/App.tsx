@@ -51,7 +51,11 @@ import {
   type Role,
   type Member,
 } from "./lib/model";
-import { localAppearance, type Appearance } from "./lib/appearance";
+import {
+  localAppearance,
+  saveLocalAppearance,
+  type Appearance,
+} from "./lib/appearance";
 import {
   AppearanceFields,
   AppearanceShortcut,
@@ -102,7 +106,10 @@ export default function App() {
     service
       .appearance(userId)
       .then((value) => {
-        if (active) setAppearance(value);
+        if (active) {
+          setAppearance(value);
+          if (!isDemo) saveLocalAppearance(value);
+        }
       })
       .catch((error) => {
         if (active) setError(message(error));
@@ -117,7 +124,8 @@ export default function App() {
   async function changeAppearance(next: Appearance) {
     setAppearanceBusy(true);
     try {
-      await service.saveAppearance(userId, next);
+      if (user || isDemo) await service.saveAppearance(userId, next);
+      if (!isDemo) saveLocalAppearance(next);
       setAppearance(next);
     } catch (error) {
       setError(message(error));
@@ -248,6 +256,7 @@ export default function App() {
   if (!user && !isDemo)
     return (
       <Auth
+        appearanceShortcut={appearanceShortcut}
         onDemo={() => {
           sessionStorage.setItem("vuxlab-demo", "1");
           setDemo(true);
@@ -478,7 +487,13 @@ export default function App() {
 export function message(e: unknown) {
   return e instanceof Error ? e.message : String(e);
 }
-function Auth({ onDemo }: { onDemo: () => void }) {
+function Auth({
+  onDemo,
+  appearanceShortcut,
+}: {
+  onDemo: () => void;
+  appearanceShortcut: ReactNode;
+}) {
   const [mode, setMode] = useState<"login" | "signup" | "reset" | "password">(
       location.hash.includes("type=recovery") ? "password" : "login",
     ),
@@ -563,6 +578,7 @@ function Auth({ onDemo }: { onDemo: () => void }) {
       </section>
       <section className="auth-form">
         <div>
+          <div className="auth-appearance">{appearanceShortcut}</div>
           <span className="eyebrow">BEM-VINDO AO VUXLAB</span>
           <h2>
             {mode === "signup"
