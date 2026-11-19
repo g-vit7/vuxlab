@@ -383,6 +383,9 @@ small {
   min-width: 0;
 }
 .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   height: 75px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
@@ -734,7 +737,8 @@ textarea {
 }
 input::placeholder,
 textarea::placeholder {
-  color: #a0aec0;
+  color: var(--muted);
+  opacity: 1;
 }
 input:disabled,
 textarea:disabled {
@@ -2672,8 +2676,7 @@ textarea {
 .appearance-shortcut > .btn[aria-expanded="true"] {
   background: var(--surface-alt);
 }
-.editor-heading:has(.appearance-shortcut [aria-expanded="true"]),
-.topbar:has(.appearance-shortcut [aria-expanded="true"]) {
+.editor-heading:has(.appearance-shortcut [aria-expanded="true"]) {
   position: relative;
   z-index: 10;
 }
