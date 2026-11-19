@@ -78,7 +78,7 @@ a:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
-  outline: 3px solid #7196ff;
+  outline: 3px solid var(--focus-ring, #7196ff);
   outline-offset: 3px;
 }
 h1,
@@ -220,6 +220,8 @@ small {
 }
 .shell {
   --sidebar-width: 236px;
+  --sidebar-tab-width: 45px;
+  --sidebar-tab-gap: 10px;
   display: flex;
   min-height: 100vh;
 }
@@ -2190,6 +2192,51 @@ textarea {
 :root[data-theme]:not([data-theme="default"]) .tool.active {
   background: var(--surface-alt);
 }
+:root[data-theme]:not([data-theme="default"]) {
+  --focus-ring: var(--blue);
+  --accent-wash: color-mix(in srgb, var(--blue) 12%, var(--surface));
+  --map-dot: color-mix(in srgb, var(--muted) 35%, transparent);
+}
+:root[data-theme]:not([data-theme="default"]) .intro-strip {
+  background: linear-gradient(100deg, var(--accent-wash), var(--surface-alt));
+  border-color: var(--line);
+}
+:root[data-theme]:not([data-theme="default"])
+  :is(.intro-icon, .strip-grid, .workspace-logo, .avatar) {
+  color: var(--blue);
+}
+:root[data-theme]:not([data-theme="default"]) .strip-grid svg,
+:root[data-theme]:not([data-theme="default"]) .new-card {
+  border-color: var(--line);
+}
+:root[data-theme]:not([data-theme="default"]) :is(.workspace-logo, .avatar) {
+  background: var(--accent-wash);
+}
+:root[data-theme]:not([data-theme="default"]) .search:focus-within {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 25%, transparent);
+}
+:root:is([data-theme="vital"], [data-theme="coffee"]) .canvas-scroll {
+  background-image: radial-gradient(var(--map-dot) 0.6px, transparent 0.6px);
+}
+:root[data-theme]:not([data-theme="default"])
+  .room-grid
+  .grid-cell:not(.occupied):hover {
+  background: var(--accent-wash);
+}
+:root[data-theme]:not([data-theme="default"])
+  .room-grid.moving
+  .grid-cell:not(.occupied) {
+  background: var(--accent-wash);
+  outline-color: var(--blue);
+}
+:root[data-theme]:not([data-theme="default"])
+  .map-object
+  .grid-cell.occupied.selected {
+  border-color: var(--blue);
+  box-shadow: none;
+  background: var(--object-bg, var(--surface-alt));
+}
+
 :root[data-theme="contrast"]
   :is(button, a, input, textarea, select, [tabindex]):focus-visible {
   outline: 3px solid var(--blue);
@@ -2221,6 +2268,7 @@ textarea {
 }
 .shell .main-shell {
   margin-left: 0;
+  padding-inline-start: calc(var(--sidebar-tab-width) + var(--sidebar-tab-gap));
   width: 100%;
   min-width: 0;
 }
@@ -2246,6 +2294,7 @@ textarea {
   inset: 50% auto auto 0;
   transform: translateY(-50%);
   z-index: 31;
+  width: var(--sidebar-tab-width);
   display: grid;
   gap: 2px;
   padding: 3px;
@@ -2256,7 +2305,7 @@ textarea {
   box-shadow: var(--shadow);
 }
 .nav-controls .btn {
-  width: 38px;
+  width: 100%;
   min-height: 42px;
 }
 .nav-controls .btn[aria-pressed="true"] {
@@ -2273,7 +2322,7 @@ textarea {
   transform: rotate(180deg);
 }
 @media (min-width: 801px) {
-  .shell.sidebar-expanded:not(.sidebar-free) .main-shell {
+  .shell.sidebar-expanded .main-shell {
     margin-left: var(--sidebar-width);
   }
 }
