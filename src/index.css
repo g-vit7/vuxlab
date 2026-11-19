@@ -219,11 +219,12 @@ small {
   border-color: #57472f;
 }
 .shell {
+  --sidebar-width: 236px;
   display: flex;
   min-height: 100vh;
 }
 .sidebar {
-  width: 236px;
+  width: var(--sidebar-width);
   flex-shrink: 0;
   background: #111c32;
   color: #91a0ba;
@@ -1467,8 +1468,10 @@ textarea {
   }
 }
 @media (max-width: 1150px) {
+  .shell {
+    --sidebar-width: 205px;
+  }
   .sidebar {
-    width: 205px;
     padding-left: 12px;
     padding-right: 12px;
   }
@@ -1512,10 +1515,12 @@ textarea {
   }
 }
 @media (max-width: 800px) {
+  .shell {
+    --sidebar-width: min(236px, calc(100vw - 46px));
+  }
   .sidebar {
     transform: translateX(-100%);
     transition: transform 0.2s;
-    width: 236px;
   }
   .sidebar.is-open {
     transform: translateX(0);
@@ -2237,29 +2242,45 @@ textarea {
   display: none;
 }
 .nav-controls {
-  gap: 0;
-  flex-shrink: 0;
+  position: fixed;
+  inset: 50% auto auto 0;
+  transform: translateY(-50%);
+  z-index: 31;
+  display: grid;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-left: 0;
+  border-radius: 0 12px 12px 0;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.nav-controls .btn {
+  width: 38px;
+  min-height: 42px;
+}
+.nav-controls .btn[aria-pressed="true"] {
+  color: var(--blue);
+  background: var(--surface-alt);
+}
+.sidebar-expanded .nav-controls {
+  left: var(--sidebar-width);
+}
+.shell:has(.editor-fullscreen) :is(.sidebar-navigation, .sidebar-backdrop) {
+  display: none;
 }
 .sidebar-arrow-open {
   transform: rotate(180deg);
 }
 @media (min-width: 801px) {
   .shell.sidebar-expanded:not(.sidebar-free) .main-shell {
-    margin-left: 236px;
-  }
-  .sidebar-free .sidebar {
-    padding-top: 54px;
+    margin-left: var(--sidebar-width);
   }
 }
 @media (max-width: 800px) {
   .sidebar-expanded .sidebar-backdrop {
     display: block;
   }
-}
-.sidebar-dismiss {
-  position: absolute;
-  top: 8px;
-  right: 8px;
 }
 .room-shell .editor-page {
   height: 100dvh;
@@ -2317,20 +2338,30 @@ textarea {
   background: var(--bg);
 }
 .editor-fullscreen .editor-layout {
-  display: block;
-  position: relative;
+  grid-template: auto minmax(0, 1fr) auto / minmax(0, 1fr);
 }
 .editor-fullscreen .canvas-section {
-  height: 100%;
+  display: contents;
+}
+.editor-fullscreen .editor-toolbar {
+  grid-area: 1 / 1;
+}
+.editor-fullscreen .canvas-scroll,
+.editor-fullscreen .properties {
+  grid-area: 2 / 1;
+}
+.editor-fullscreen .canvas-footer {
+  grid-area: 3 / 1;
 }
 .editor-fullscreen .properties {
-  position: absolute;
-  top: 48px;
-  right: 12px;
-  bottom: 48px;
-  left: auto;
+  position: relative;
+  inset: auto;
+  justify-self: end;
+  margin: 8px 12px;
   height: auto;
   width: min(300px, calc(100% - 24px));
+  z-index: 5;
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 9px;
   box-shadow: var(--shadow);
@@ -2536,9 +2567,8 @@ textarea {
     display: none;
   }
   .editor-fullscreen .properties {
-    top: auto;
-    bottom: 47px;
-    max-height: min(65dvh, 550px);
+    align-self: end;
+    max-height: min(calc(100% - 16px), 65dvh, 550px);
   }
 }
 .editor-fullscreen {
@@ -2584,4 +2614,49 @@ textarea {
 :root[data-theme="contrast"] .zoom-tools button,
 :root[data-theme="contrast"] .nav-item {
   font-weight: 650;
+}
+
+.appearance-shortcut {
+  position: relative;
+  flex-shrink: 0;
+}
+.appearance-shortcut > .btn[aria-expanded="true"] {
+  background: var(--surface-alt);
+}
+.editor-heading:has(.appearance-shortcut [aria-expanded="true"]),
+.topbar:has(.appearance-shortcut [aria-expanded="true"]) {
+  position: relative;
+  z-index: 10;
+}
+.appearance-options {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  width: min(230px, calc(100vw - 104px));
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  box-shadow: var(--shadow);
+}
+.appearance-options label {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+.appearance-options select {
+  width: 100%;
+  min-width: 0;
+}
+@media (max-width: 900px) {
+  .appearance-label {
+    display: none;
+  }
+  .appearance-shortcut > .btn {
+    padding-inline: 8px;
+  }
 }

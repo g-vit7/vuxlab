@@ -1,6 +1,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
   type ReactNode,
@@ -23,7 +24,6 @@ import {
   LogOut,
   Lock,
   LockOpen,
-  X,
   Users,
   ArrowLeft,
   Monitor,
@@ -51,12 +51,11 @@ import {
   type Role,
   type Member,
 } from "./lib/model";
+import { localAppearance, type Appearance } from "./lib/appearance";
 import {
-  localAppearance,
-  modes,
-  themes,
-  type Appearance,
-} from "./lib/appearance";
+  AppearanceFields,
+  AppearanceShortcut,
+} from "./components/AppearanceControls";
 import Editor from "./features/editor/Editor";
 import WorkspaceNotes from "./components/WorkspaceNotes";
 import PersonalNotes from "./features/notes/PersonalNotes";
@@ -126,8 +125,39 @@ export default function App() {
       setAppearanceBusy(false);
     }
   }
+  const navigation = useRef<HTMLDivElement>(null);
+  function leaveNavigation(next: EventTarget | null) {
+    if (
+      freeSidebar &&
+      !(next instanceof Node && navigation.current?.contains(next))
+    ) {
+      if (navigation.current?.querySelector(":hover")) return;
+      setSidebar(false);
+    }
+  }
+  const appearanceShortcut = (
+    <AppearanceShortcut
+      appearance={appearance}
+      busy={appearanceBusy}
+      onChange={changeAppearance}
+    />
+  );
   const menuControls = (
-    <div className="row nav-controls">
+    <div
+      className="nav-controls"
+      role="group"
+      aria-label="Controles do menu lateral"
+      onPointerLeave={(event) => {
+        if (
+          event.pointerType === "mouse" &&
+          !document
+            .getElementById("main-sidebar")
+            ?.contains(document.activeElement)
+        )
+          leaveNavigation(event.relatedTarget);
+      }}
+      onBlur={(event) => leaveNavigation(event.relatedTarget)}
+    >
       <Button
         size="icon"
         variant="ghost"
@@ -228,132 +258,117 @@ export default function App() {
     <div
       className={`shell ${inEditor ? "room-shell" : ""} ${freeSidebar ? "sidebar-free" : ""} ${sidebar ? "sidebar-expanded" : ""}`}
     >
-      {freeSidebar && !sidebar && (
-        <div
-          className="sidebar-edge"
-          aria-hidden="true"
-          onPointerEnter={(event) => {
-            if (event.pointerType === "mouse") setSidebar(true);
-          }}
-        />
-      )}
       {sidebar && (
         <div className="sidebar-backdrop" onClick={() => setSidebar(false)} />
       )}
-      <aside
-        id="main-sidebar"
-        className={`sidebar ${sidebar ? "is-open" : ""}`}
-        inert={!sidebar}
-        onPointerLeave={(event) => {
-          if (
-            freeSidebar &&
-            event.pointerType === "mouse" &&
-            !event.currentTarget.contains(document.activeElement)
-          )
-            setSidebar(false);
-        }}
-        onBlur={(event) => {
-          if (
-            freeSidebar &&
-            !event.currentTarget.contains(event.relatedTarget) &&
-            !event.currentTarget.matches(":hover")
-          )
-            setSidebar(false);
-        }}
-      >
-        <Button
-          className="sidebar-dismiss"
-          size="icon"
-          variant="ghost"
-          aria-label="Recolher navegação"
-          onClick={() => setSidebar(false)}
-        >
-          <X size={16} />
-        </Button>
-        <Link className="brand" to="/">
-          <div className="brand-mark">
-            <Boxes size={25} />
-          </div>
-          vuxlab<span className="brand-dot">.</span>
-        </Link>
-        <div className="sidebar-section">SEU AMBIENTE</div>
-        <Link
-          className={`nav-item ${location.pathname === "/" ? "active" : ""}`}
-          to="/"
-          onClick={() => setSidebar(false)}
-        >
-          <LayoutGrid size={18} />
-          Workspaces
-        </Link>
-        <div className="sidebar-section">
-          WORKSPACES <span>{spaces.length}</span>
-        </div>
-        {spaces.map((w) => (
-          <Link
-            onClick={() => setSidebar(false)}
-            className={`nav-item ${w.id === activeId ? "active" : ""}`}
-            key={w.id}
-            to={`/w/${w.id}`}
-          >
-            <span className="workspace-initial">{w.name[0]}</span>
-            <span className="ellipsis">{w.name}</span>
-            <ChevronRight size={14} />
-          </Link>
-        ))}
-        <div className="sidebar-bottom">
-          <div className="sidebar-tip">
-            <ShieldCheck size={20} />
-            <strong>Um lugar para cada coisa.</strong>
-            <p>Organize seus espaços e trabalhe junto com sua equipe.</p>
-          </div>
-          <Link
-            to="/notas"
-            className={`nav-item ${location.pathname === "/notas" ? "active" : ""}`}
-            onClick={() => setSidebar(false)}
-          >
-            <NotebookPen size={18} />
-            Minhas notas
-          </Link>
-          <Link
-            to="/conta"
-            className="nav-item"
-            onClick={() => setSidebar(false)}
-          >
-            <Settings size={18} />
-            Minha conta
-          </Link>
-          <button
-            className="nav-item"
-            onClick={async () => {
-              if (isDemo) {
-                sessionStorage.removeItem("vuxlab-demo");
-                setDemo(false);
-              } else await supabase!.auth.signOut();
-              navigate("/");
+      <div className="sidebar-navigation" ref={navigation}>
+        {freeSidebar && !sidebar && (
+          <div
+            className="sidebar-edge"
+            aria-hidden="true"
+            onPointerEnter={(event) => {
+              if (event.pointerType === "mouse") setSidebar(true);
             }}
+          />
+        )}
+        {menuControls}
+        <aside
+          id="main-sidebar"
+          className={`sidebar ${sidebar ? "is-open" : ""}`}
+          inert={!sidebar}
+          onPointerLeave={(event) => {
+            if (
+              event.pointerType === "mouse" &&
+              !event.currentTarget.contains(document.activeElement)
+            )
+              leaveNavigation(event.relatedTarget);
+          }}
+          onBlur={(event) => leaveNavigation(event.relatedTarget)}
+        >
+          <Link className="brand" to="/">
+            <div className="brand-mark">
+              <Boxes size={25} />
+            </div>
+            vuxlab<span className="brand-dot">.</span>
+          </Link>
+          <div className="sidebar-section">SEU AMBIENTE</div>
+          <Link
+            className={`nav-item ${location.pathname === "/" ? "active" : ""}`}
+            to="/"
+            onClick={() => setSidebar(false)}
           >
-            <LogOut size={18} />
-            Sair
-          </button>
-          <div className="profile">
-            <span className="avatar">
-              {(displayName?.[0] || user?.email?.[0] || "V").toUpperCase()}
-            </span>
-            <div>
-              <strong>
-                {displayName || user?.email?.split("@")[0] || "Sua conta"}
-              </strong>
-              <small>
-                {isDemo ? "Dados salvos neste navegador" : "Sua conta Vuxlab"}
-              </small>
+            <LayoutGrid size={18} />
+            Workspaces
+          </Link>
+          <div className="sidebar-section">
+            WORKSPACES <span>{spaces.length}</span>
+          </div>
+          {spaces.map((w) => (
+            <Link
+              onClick={() => setSidebar(false)}
+              className={`nav-item ${w.id === activeId ? "active" : ""}`}
+              key={w.id}
+              to={`/w/${w.id}`}
+            >
+              <span className="workspace-initial">{w.name[0]}</span>
+              <span className="ellipsis">{w.name}</span>
+              <ChevronRight size={14} />
+            </Link>
+          ))}
+          <div className="sidebar-bottom">
+            <div className="sidebar-tip">
+              <ShieldCheck size={20} />
+              <strong>Um lugar para cada coisa.</strong>
+              <p>Organize seus espaços e trabalhe junto com sua equipe.</p>
+            </div>
+            <Link
+              to="/notas"
+              className={`nav-item ${location.pathname === "/notas" ? "active" : ""}`}
+              onClick={() => setSidebar(false)}
+            >
+              <NotebookPen size={18} />
+              Minhas notas
+            </Link>
+            <Link
+              to="/conta"
+              className="nav-item"
+              onClick={() => setSidebar(false)}
+            >
+              <Settings size={18} />
+              Minha conta
+            </Link>
+            <button
+              className="nav-item"
+              onClick={async () => {
+                if (isDemo) {
+                  sessionStorage.removeItem("vuxlab-demo");
+                  setDemo(false);
+                } else await supabase!.auth.signOut();
+                navigate("/");
+              }}
+            >
+              <LogOut size={18} />
+              Sair
+            </button>
+            <div className="profile">
+              <span className="avatar">
+                {(displayName?.[0] || user?.email?.[0] || "V").toUpperCase()}
+              </span>
+              <div>
+                <strong>
+                  {displayName || user?.email?.split("@")[0] || "Sua conta"}
+                </strong>
+                <small>
+                  {isDemo ? "Dados salvos neste navegador" : "Sua conta Vuxlab"}
+                </small>
+              </div>
             </div>
           </div>
-        </div>
-      </aside>
+        </aside>
+      </div>
       <div className="main-shell">
         <header className="topbar" hidden={inEditor}>
           <div className="row">
-            {menuControls}
             <span className="muted">Meu ambiente</span>
             {active && (
               <>
@@ -366,6 +381,7 @@ export default function App() {
             {isDemo && (
               <span className="badge demo-badge">Demonstração local</span>
             )}
+            {appearanceShortcut}
             <span className="avatar small">
               {(displayName?.[0] || user?.email?.[0] || "V").toUpperCase()}
             </span>
@@ -402,7 +418,7 @@ export default function App() {
                   fail={setError}
                   isDemo={isDemo}
                   refreshSpaces={refresh}
-                  menuControls={menuControls}
+                  appearanceShortcut={appearanceShortcut}
                 />
               ) : (
                 <div className="page empty">
@@ -751,7 +767,7 @@ function WorkspaceList({
 }
 function WorkspacePage({
   workspace: w,
-  menuControls,
+  appearanceShortcut,
   service,
   userId,
   fail,
@@ -759,7 +775,7 @@ function WorkspacePage({
   refreshSpaces,
 }: {
   workspace: Workspace;
-  menuControls: ReactNode;
+  appearanceShortcut: ReactNode;
   service: Api;
   userId: string;
   fail: (s: string) => void;
@@ -819,7 +835,7 @@ function WorkspacePage({
         service={service}
         fail={fail}
         onReload={refresh}
-        menuControls={menuControls}
+        appearanceShortcut={appearanceShortcut}
       />
     ) : (
       <div className="page empty">
@@ -1410,44 +1426,11 @@ function Account({
       </section>
       <section className="panel">
         <h3>Aparência</h3>
-        <label>
-          Tema
-          <select
-            value={appearance.theme}
-            disabled={appearanceBusy}
-            onChange={(e) =>
-              void onAppearanceChange({
-                ...appearance,
-                theme: e.target.value as Appearance["theme"],
-              })
-            }
-          >
-            {Object.entries(themes).map(([key, name]) => (
-              <option key={key} value={key}>
-                {name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Modo de exibição
-          <select
-            value={appearance.mode}
-            disabled={appearanceBusy}
-            onChange={(e) =>
-              void onAppearanceChange({
-                ...appearance,
-                mode: e.target.value as Appearance["mode"],
-              })
-            }
-          >
-            {Object.entries(modes).map(([key, name]) => (
-              <option key={key} value={key}>
-                {name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <AppearanceFields
+          appearance={appearance}
+          busy={appearanceBusy}
+          onChange={onAppearanceChange}
+        />
       </section>
       <section className="panel">
         <h3>Seu acesso</h3>

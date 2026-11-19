@@ -92,7 +92,7 @@ export default function Editor({
   service,
   fail,
   onReload,
-  menuControls,
+  appearanceShortcut,
 }: {
   room: Room;
   workspace: Workspace;
@@ -100,7 +100,7 @@ export default function Editor({
   service: Api;
   fail: (s: string) => void;
   onReload: () => Promise<void>;
-  menuControls: ReactNode;
+  appearanceShortcut: ReactNode;
 }) {
   const [room, setRoom] = useState(initial),
     [selected, setSelected] = useState<string>(),
@@ -226,6 +226,7 @@ export default function Editor({
     }
     function key(event: KeyboardEvent) {
       if (
+        !event.defaultPrevented &&
         event.code === "Escape" &&
         !document.fullscreenElement &&
         !document.querySelector('[role="dialog"]')
@@ -618,7 +619,6 @@ export default function Editor({
     >
       <div className="editor-heading" role="region" aria-label="Ações da sala">
         <div className="room-heading-title">
-          {!fullscreen && menuControls}
           <Link className="back-link" to={`/w/${w.id}`}>
             <ArrowLeft size={14} />
             <span className="sr-only">Todas as salas</span>
@@ -675,6 +675,7 @@ export default function Editor({
               <span className="hide-small">Histórico</span>
             </Button>
           )}
+          {appearanceShortcut}
           <Button
             size="sm"
             onClick={() => void flush()}
