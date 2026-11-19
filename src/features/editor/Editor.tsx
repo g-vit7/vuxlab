@@ -814,7 +814,13 @@ export default function Editor({
     }
   }
   function exportRoom() {
-    const { name, width, height, objects } = current.current;
+    const { name, width, height, objects: roomObjects } = current.current;
+    const objects = roomObjects.map((object) => ({
+      ...object,
+      attributes: object.attributes.filter(
+        (attr) => attr.name !== "Notas compartilhadas",
+      ),
+    }));
     const blob = new Blob(
         [JSON.stringify({ name, width, height, objects }, null, 2)],
         { type: "application/json" },

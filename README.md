@@ -172,6 +172,8 @@ Para versões futuras: cores personalizadas para objetos, formatos em U, ícones
 
 Antes de publicar a versão 0.3.0, aplique a migração `202611190003_structured_notes.sql` depois das migrações do editor e do cadastro. Notas antigas mantêm seu texto e seus vínculos. Quando a data ou o autor não eram registrados, a interface informa essa ausência.
 
+O JSON de sala exporta o mapa e os atributos. Os cards de notas permanecem no banco; cópias antigas do atributo de notas não são incluídas em novas exportações.
+
 A tela **Notas** reúne as abas **Minhas notas** e **Compartilhadas**. O mapa usa a maior urgência das notas compartilhadas visíveis de cada objeto. O indicador abre as notas no desktop e é apenas visual em telas de toque.
 
 **Manter conectado** vem desmarcado. Por padrão a sessão usa o armazenamento da aba, e a opção marcada permite lembrar o login no navegador. Sessões persistentes da versão anterior exigem um novo login.

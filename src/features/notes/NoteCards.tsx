@@ -219,11 +219,14 @@ export default function NoteCards({
                     title,
                     body,
                     category: data.get("category") as NoteCategory,
-                    noted_at: date
-                      ? new Date(date).toISOString()
-                      : draft.note
-                        ? null
-                        : new Date().toISOString(),
+                    noted_at:
+                      date && date !== draft.date
+                        ? new Date(date).toISOString()
+                        : draft.note
+                          ? date
+                            ? draft.note.noted_at
+                            : null
+                          : new Date().toISOString(),
                   },
                   draft.note?.id,
                 );
