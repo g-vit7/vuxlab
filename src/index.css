@@ -2935,3 +2935,121 @@ textarea {
 .editor-mobile-details .properties-actions .btn {
   min-height: 40px;
 }
+
+/* Note urgency uses color on the card and never changes the object itself. */
+.remember-session {
+  margin-block: 3px 12px;
+}
+.note-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px 12px;
+  margin-bottom: 14px;
+}
+.note-controls label {
+  flex: 1 1 110px;
+  min-width: 0;
+  margin: 0;
+}
+.note-controls .btn {
+  min-height: 38px;
+}
+.notes-tabs {
+  margin-bottom: 16px;
+}
+.note-group + .note-group {
+  margin-top: 16px;
+}
+.note-group h3 {
+  margin-bottom: 7px;
+}
+.structured-note {
+  border: 1px solid var(--line);
+  border-inline-start: 4px solid var(--note-accent, var(--line));
+  border-radius: 7px;
+  background: var(--surface);
+  margin-bottom: 8px;
+}
+.structured-note.warning,
+.object-warning.warning {
+  --note-accent: #946308;
+}
+.structured-note.critical,
+.object-warning.critical {
+  --note-accent: #be3044;
+}
+.dark :is(.structured-note, .object-warning).warning {
+  --note-accent: #ffce59;
+}
+.dark :is(.structured-note, .object-warning).critical {
+  --note-accent: #ff7684;
+}
+.structured-note:is(.warning, .critical) {
+  background: color-mix(in srgb, var(--note-accent) 10%, var(--surface));
+}
+.structured-note summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 10px;
+  overflow-wrap: anywhere;
+}
+.structured-note summary::-webkit-details-marker {
+  display: none;
+}
+.structured-note summary strong {
+  flex: 1;
+  min-width: 0;
+}
+.structured-note summary small {
+  color: var(--muted);
+  min-width: 0;
+}
+.structured-note summary svg {
+  flex-shrink: 0;
+}
+.structured-note[open] summary svg {
+  transform: rotate(180deg);
+}
+.structured-note-body {
+  padding: 0 10px 10px;
+  display: grid;
+  gap: 8px;
+}
+.structured-note-body p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.object-warning {
+  position: absolute;
+  z-index: 1;
+  inset: 1px 1px auto auto;
+  display: grid;
+  place-items: center;
+  padding: 3px;
+  border: 1px solid var(--note-accent);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--note-accent);
+}
+.object-warning.warning-left {
+  inset: 1px auto auto 1px;
+}
+span.object-warning,
+.canvas-scroll.pan-tool .object-warning,
+.room-grid.moving .object-warning {
+  pointer-events: none;
+}
+@media (max-width: 550px) {
+  .editor-toolbar .tool,
+  .editor-toolbar > .row > .btn {
+    width: 28px;
+    min-width: 28px;
+    padding-inline: 3px;
+  }
+  .editor-toolbar > .row {
+    gap: 4px;
+  }
+}

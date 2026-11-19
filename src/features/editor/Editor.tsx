@@ -44,6 +44,7 @@ import {
   Square,
   Info,
   FileText,
+  TriangleAlert,
 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Dialog } from "../../components/ui/dialog";
@@ -63,8 +64,12 @@ import {
   type Attribute,
   type History,
   type Note,
+  type NoteCategory,
+  type NoteVisibility,
+  urgency,
 } from "../../lib/model";
 import type { Api } from "../../lib/api";
+import NoteCards from "../notes/NoteCards";
 import { toView, fromView, clampZoom, pinchGeometry } from "./view";
 const mobileDetailsQuery =
   "(max-width: 800px), (hover: none) and (pointer: coarse)";
@@ -95,6 +100,7 @@ export default function Editor({
   room: initial,
   workspace: w,
   userId,
+  displayName,
   service,
   fail,
   onReload,
@@ -103,6 +109,7 @@ export default function Editor({
   room: Room;
   workspace: Workspace;
   userId: string;
+  displayName: string;
   service: Api;
   fail: (s: string) => void;
   onReload: () => Promise<void>;
@@ -122,9 +129,8 @@ export default function Editor({
     [history, setHistory] = useState<History[]>([]),
     [resize, setResize] = useState(false),
     [resized, setResized] = useState<ReturnType<typeof resizeRoom>>(),
-    [notes, setNotes] = useState<Note[]>([]),
-    [noteText, setNoteText] = useState(""),
-    [noteId, setNoteId] = useState<string>(),
+    [personalNotes, setPersonalNotes] = useState<Note[]>([]),
+    [sharedNotes, setSharedNotes] = useState<Note[]>([]),
     [noteScope, setNoteScope] = useState<"workspace" | "room" | "object">(
       "room",
     ),
@@ -214,11 +220,9 @@ export default function Editor({
   );
   const manage = canManageRoom(w.role, room, userId),
     object = room.objects.find((o) => o.id === selected),
-    sharedNotes = object?.attributes.find(
-      (a) => a.name === "Notas compartilhadas",
-    ),
     cell = Math.round(68 * zoom);
-  const hasProperties = !!object || panel === "notes" || panel === "room";
+  const hasProperties =
+    !!object || panel === "notes" || panel === "room" || panel === "shared";
   const mobileDetailsOpen =
     mobileDetails && hasProperties && !move && !mobilePanelHidden;
   useEffect(() => {
@@ -714,28 +718,64 @@ export default function Editor({
       manage ? undefined : a.id,
     );
   }
-  async function getNotes() {
-    try {
-      setNotes(await service.notes(w.id));
-    } catch (e) {
-      fail(String(e));
-    }
+  const noteRequests = useRef({ shared: 0, personal: 0 });
+  async function getNotes(visibility: NoteVisibility) {
+    const request = ++noteRequests.current[visibility];
+    const notes = await service.listNotes(visibility, w.id);
+    if (mounted.current && request === noteRequests.current[visibility])
+      (visibility === "shared" ? setSharedNotes : setPersonalNotes)(notes);
   }
   useEffect(() => {
-    void getNotes();
-  }, [w.id]);
+    let live = true;
+    for (const visibility of ["shared", "personal"] as const)
+      void getNotes(visibility).catch((error) => {
+        if (live) fail(String(error));
+      });
+    return () => {
+      live = false;
+    };
+  }, [service, w.id]);
   useEffect(() => {
-    setNoteId(undefined);
-    setNoteText("");
     setSize(undefined);
-    if (!selected && noteScope === "object") setNoteScope("room");
   }, [selected]);
-  const scopedNotes = notes.filter((n) =>
-    noteScope === "workspace"
-      ? !n.room_id
-      : noteScope === "room"
-        ? n.room_id === room.id && !n.object_id
-        : n.object_id === selected,
+  const objectUrgency = useMemo(() => {
+    const levels = new Map<string, NoteCategory>();
+    for (const note of sharedNotes) {
+      if (
+        note.room_id !== room.id ||
+        !note.object_id ||
+        note.category === "reminder"
+      )
+        continue;
+      if (
+        urgency[note.category] >
+        urgency[levels.get(note.object_id) ?? "reminder"]
+      )
+        levels.set(note.object_id, note.category);
+    }
+    return levels;
+  }, [sharedNotes, room.id]);
+
+  function openNotes(visibility: NoteVisibility, objectId = object?.id) {
+    setMobilePanelHidden(false);
+    setNoteScope(objectId ? "object" : "room");
+    if (objectId) setSelected(objectId);
+    setPanel(visibility === "shared" ? "shared" : "notes");
+    void getNotes(visibility).catch((error) => fail(String(error)));
+  }
+
+  const noteVisibility = panel === "shared" ? "shared" : "personal";
+  const noteLocation = {
+    workspace_id: w.id,
+    room_id: noteScope === "workspace" ? null : room.id,
+    object_id: noteScope === "object" ? (object?.id ?? null) : null,
+  };
+  const scopedNotes = (
+    noteVisibility === "shared" ? sharedNotes : personalNotes
+  ).filter(
+    (note) =>
+      note.room_id === noteLocation.room_id &&
+      note.object_id === noteLocation.object_id,
   );
   function clickCell(x: number, y: number) {
     const occupied = cells.get(`${x}:${y}`);
@@ -747,8 +787,6 @@ export default function Editor({
       setMobilePanelHidden(false);
       setSelected(occupied.id);
       setPanel("attributes");
-      setNoteId(undefined);
-      setNoteText("");
       return;
     }
     if (manage && tool !== "select") {
@@ -960,11 +998,16 @@ export default function Editor({
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => {
-                  setMobilePanelHidden(false);
-                  setPanel("notes");
-                }}
+                onClick={() => openNotes("personal")}
                 aria-label="Abrir notas particulares"
+              >
+                <Lock size={16} />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => openNotes("shared")}
+                aria-label="Abrir notas compartilhadas"
               >
                 <FileText size={16} />
               </Button>
@@ -1111,6 +1154,9 @@ export default function Editor({
                     );
                   })}
                   {room.objects.map((o) => {
+                    const level = objectUrgency.get(o.id);
+                    const warningLabel =
+                      level === "critical" ? "Nota grave" : "Nota de aviso";
                     return (
                       <div
                         key={o.id}
@@ -1151,6 +1197,26 @@ export default function Editor({
                           />
                           {zoom >= 0.7 && <span>{identifier(o)}</span>}
                         </button>
+                        {level &&
+                          (mobileDetails ? (
+                            <span
+                              role="img"
+                              aria-label={warningLabel}
+                              className={`object-warning ${level} ${turn === 3 ? "warning-left" : ""}`}
+                            >
+                              <TriangleAlert size={14} aria-hidden="true" />
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              className={`object-warning ${level} ${turn === 3 ? "warning-left" : ""}`}
+                              title={`${warningLabel} · Abrir notas compartilhadas`}
+                              aria-label={`${warningLabel} em ${identifier(o)}. Abrir notas compartilhadas`}
+                              onClick={() => openNotes("shared", o.id)}
+                            >
+                              <TriangleAlert size={14} aria-hidden="true" />
+                            </button>
+                          ))}
                         {zoom < 0.7 && (
                           <span
                             aria-hidden="true"
@@ -1368,19 +1434,6 @@ export default function Editor({
               </>
             )}
           </div>
-          {sharedNotes && (
-            <Button
-              className="shared-notes-action"
-              size="sm"
-              variant={panel === "shared" ? "default" : "outline"}
-              aria-pressed={panel === "shared"}
-              onClick={() =>
-                setPanel(panel === "shared" ? "attributes" : "shared")
-              }
-            >
-              <FileText size={16} /> Notas compartilhadas
-            </Button>
-          )}
           <div className="tabs">
             <button
               className={panel === "attributes" ? "active" : ""}
@@ -1390,17 +1443,20 @@ export default function Editor({
             </button>
             <button
               className={panel === "notes" ? "active" : ""}
-              onClick={() => {
-                setPanel("notes");
-                void getNotes();
-              }}
+              onClick={() => openNotes("personal")}
             >
               <Lock size={13} />
               Minhas notas
             </button>
+            <button
+              className={panel === "shared" ? "active" : ""}
+              onClick={() => openNotes("shared")}
+            >
+              <FileText size={13} /> Compartilhadas
+            </button>
           </div>
           <div className="properties-scroll" ref={detailsScroll}>
-            {panel !== "notes" ? (
+            {panel !== "notes" && panel !== "shared" ? (
               object ? (
                 <>
                   <div className="object-summary">
@@ -1425,9 +1481,7 @@ export default function Editor({
                   <div className="property-content">
                     <div className="section-heading">
                       <span className="eyebrow">
-                        {panel === "shared"
-                          ? "Notas do objeto"
-                          : "Atributos compartilhados"}
+                        {"Atributos compartilhados"}
                       </span>
                       {manage && panel === "attributes" && (
                         <Button
@@ -1441,11 +1495,7 @@ export default function Editor({
                       )}
                     </div>
                     {object.attributes
-                      .filter((a) =>
-                        panel === "shared"
-                          ? a.id === sharedNotes?.id
-                          : a.id !== sharedNotes?.id,
-                      )
+                      .filter((a) => a.name !== "Notas compartilhadas")
                       .map((a) => (
                         <div className="attribute" key={a.id}>
                           <div className="row between">
@@ -1682,7 +1732,10 @@ export default function Editor({
                   <p>
                     Selecione um objeto no mapa para consultar seus atributos.
                   </p>
-                  <Button variant="outline" onClick={() => setPanel("notes")}>
+                  <Button
+                    variant="outline"
+                    onClick={() => openNotes("personal")}
+                  >
                     <FileText size={16} />
                     Notas particulares
                   </Button>
@@ -1718,20 +1771,14 @@ export default function Editor({
               )
             ) : (
               <div className="property-content">
-                <p className="notice tiny">
-                  <Lock size={14} /> Somente você pode acessar estas notas,
-                  inclusive em Workspaces administrados por outras pessoas.
-                </p>
                 <label>
-                  Vincular nota a
+                  Local das notas
                   <select
                     name="note_scope"
                     value={noteScope}
-                    onChange={(e) => {
-                      setNoteScope(e.target.value as typeof noteScope);
-                      setNoteId(undefined);
-                      setNoteText("");
-                    }}
+                    onChange={(e) =>
+                      setNoteScope(e.target.value as typeof noteScope)
+                    }
                   >
                     <option value="workspace">Workspace</option>
                     <option value="room">Esta sala</option>
@@ -1740,85 +1787,46 @@ export default function Editor({
                     )}
                   </select>
                 </label>
-                {scopedNotes.map((n) => (
-                  <div className="note-card" key={n.id}>
-                    <p>{n.body}</p>
-                    <div className="row">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          setNoteId(n.id);
-                          setNoteText(n.body);
-                        }}
-                      >
-                        Editar
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={async () => {
-                          if (!confirm("Excluir esta nota particular?")) return;
-                          try {
-                            await service.deleteNote(n.id);
-                            await getNotes();
-                          } catch (e) {
-                            fail(String(e));
-                          }
-                        }}
-                      >
-                        Excluir
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-                <label>
-                  {noteId ? "Editar nota" : "Nova nota"}
-                  <textarea
-                    name="note_text"
-                    value={noteText}
-                    onChange={(e) => setNoteText(e.target.value)}
-                    maxLength={20000}
-                    rows={5}
-                    placeholder="Uma observação só sua…"
-                  />
-                </label>
-                <Button
-                  disabled={
-                    !noteText.trim() ||
-                    busy ||
-                    (noteScope === "object" && !object)
+                <NoteCards
+                  key={`${noteVisibility}:${noteScope}:${object?.id ?? ""}`}
+                  notes={scopedNotes}
+                  locations={
+                    noteVisibility === "personal" || w.role !== "public"
+                      ? [
+                          {
+                            ...noteLocation,
+                            label:
+                              object && noteScope === "object"
+                                ? identifier(object)
+                                : room.name,
+                          },
+                        ]
+                      : []
                   }
-                  onClick={async () => {
-                    setBusy(true);
-                    try {
-                      await flush();
-                      if (failed.current)
-                        throw Error(
-                          "Resolva o erro de salvamento antes de salvar a nota.",
-                        );
-                      await service.saveNote(
-                        {
-                          workspace_id: w.id,
-                          room_id: noteScope === "workspace" ? null : room.id,
-                          object_id: noteScope === "object" ? selected! : null,
-                          body: noteText,
-                        },
-                        noteId,
+                  authorLabel={(note) =>
+                    note.author_id === userId
+                      ? displayName || "Eu"
+                      : note.author_name || "Autor não informado"
+                  }
+                  canEdit={(note) =>
+                    note.author_id === userId ||
+                    (noteVisibility === "shared" && w.role === "admin")
+                  }
+                  onSave={async (draft, id) => {
+                    await flush();
+                    if (failed.current && draft.object_id)
+                      throw Error(
+                        "Resolva o erro de salvamento da sala antes de salvar a nota.",
                       );
-                      setNoteText("");
-                      setNoteId(undefined);
-                      await getNotes();
-                    } catch (e) {
-                      fail(String(e));
-                    } finally {
-                      setBusy(false);
-                    }
+                    await service.saveNote(noteVisibility, draft, id);
+                    await getNotes(noteVisibility);
                   }}
-                >
-                  <Lock size={14} />
-                  Salvar nota
-                </Button>
+                  onDelete={async (id) => {
+                    await service.deleteNote(noteVisibility, id);
+                    await getNotes(noteVisibility);
+                  }}
+                  fail={fail}
+                />
               </div>
             )}
           </div>

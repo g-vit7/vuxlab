@@ -627,5 +627,141 @@ await test("Cadastro cria perfil a partir de um nome válido e aceita contas sem
     [],
   );
 });
+await db.exec("reset role");
+const legacyObject = room.objects[0].id;
+await db.query(
+  "insert into public.attributes(id,object_id,name,type,value,visibility,edit_role) values($1,$2,'Notas compartilhadas','list',$3,'teacher','teacher')",
+  [randomUUID(), legacyObject, ["Nota anterior\nPreservada"]],
+);
+await db.exec(
+  await readFile(
+    new URL(
+      "../supabase/migrations/202611190003_structured_notes.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+);
+
+await test("Notas estruturadas preservam dados antigos e exigem permissões por autor e Workspace", async () => {
+  const legacy = (
+    await db.query(
+      "select title,body,author_id,noted_at from public.shared_notes where object_id=$1",
+      [legacyObject],
+    )
+  ).rows;
+  assert.deepEqual(legacy, [
+    {
+      title: "Nota anterior",
+      body: "Nota anterior\nPreservada",
+      author_id: null,
+      noted_at: null,
+    },
+  ]);
+  await as(admin);
+  const invite = await rpc("create_invite", [w, "public", 1, 1]);
+  await as(pub);
+  await rpc("accept_invite", [invite]);
+  await rejects(
+    () =>
+      db.query(
+        "insert into public.shared_notes(workspace_id,title,body) values($1,'Impedido','Texto')",
+        [w],
+      ),
+    /row-level security/,
+  );
+  assert.deepEqual(
+    (await db.query("select title from public.shared_notes")).rows,
+    [],
+  );
+
+  await as(teacher);
+  const shared = (
+    await db.query(
+      "insert into public.shared_notes(workspace_id,room_id,object_id,title,body,category) values($1,$2,$3,'Sem mouse','Trocar o mouse','warning') returning id,author_id,author_name,noted_at",
+      [w, room.id, legacyObject],
+    )
+  ).rows[0];
+  assert.equal(shared.author_id, teacher);
+  assert.equal(shared.author_name, "Docente de teste");
+  assert.ok(shared.noted_at);
+  const personal = (
+    await db.query(
+      "insert into public.private_notes(workspace_id,room_id,object_id,title,body,category) values($1,$2,$3,'Privada','Texto','critical') returning id",
+      [w, room.id, legacyObject],
+    )
+  ).rows[0].id;
+  await rejects(
+    () =>
+      db.query("update public.shared_notes set author_id=$1 where id=$2", [
+        pub,
+        shared.id,
+      ]),
+    /permission denied/,
+  );
+
+  await as(pub);
+  assert.deepEqual(
+    (await db.query("select title from public.shared_notes")).rows,
+    [{ title: "Sem mouse" }],
+  );
+  assert.deepEqual(
+    (
+      await db.query(
+        "update public.shared_notes set category='critical' where id=$1 returning id",
+        [shared.id],
+      )
+    ).rows,
+    [],
+  );
+  assert.deepEqual(
+    (
+      await db.query(
+        "delete from public.shared_notes where id=$1 returning id",
+        [shared.id],
+      )
+    ).rows,
+    [],
+  );
+
+  await as(admin);
+  assert.deepEqual(
+    (
+      await db.query(
+        "update public.shared_notes set category='critical' where id=$1 returning category",
+        [shared.id],
+      )
+    ).rows,
+    [{ category: "critical" }],
+  );
+  assert.deepEqual(
+    (
+      await db.query("select id from public.private_notes where id=$1", [
+        personal,
+      ])
+    ).rows,
+    [],
+  );
+  const otherWorkspace = await rpc("create_workspace", ["Outro local"]);
+  await rejects(
+    () =>
+      db.query(
+        "insert into public.shared_notes(workspace_id,room_id,object_id,title,body) values($1,$2,$3,'Inconsistente','Texto')",
+        [otherWorkspace, room.id, legacyObject],
+      ),
+    /row-level security/,
+  );
+
+  await as(teacher);
+  assert.deepEqual(
+    (
+      await db.query(
+        "delete from public.shared_notes where id=$1 returning id",
+        [shared.id],
+      )
+    ).rows,
+    [{ id: shared.id }],
+  );
+});
 console.log(`\n${count} cenários PostgreSQL/RLS aprovados.`);
 await db.close();

@@ -84,14 +84,51 @@ export type Room = z.infer<typeof roomSchema> & {
   version: number;
 };
 export type Workspace = { id: string; name: string; role: Role };
-export type Note = {
-  id: string;
+export const noteCategories = {
+  critical: "Grave",
+  warning: "Aviso",
+  reminder: "Lembrete",
+} as const;
+export type NoteCategory = keyof typeof noteCategories;
+export type NoteVisibility = "personal" | "shared";
+export type NoteScope = {
   workspace_id: string;
   room_id: string | null;
   object_id: string | null;
-  author_id: string;
-  body: string;
 };
+export type NoteDraft = NoteScope & {
+  title: string;
+  body: string;
+  category: NoteCategory;
+  noted_at: string | null;
+};
+export type Note = NoteDraft & {
+  id: string;
+  author_id: string | null;
+  author_name?: string | null;
+};
+
+export const urgency: Record<NoteCategory, number> = {
+  critical: 2,
+  warning: 1,
+  reminder: 0,
+};
+export function noteTitle(note: Pick<Note, "title" | "body">) {
+  return (
+    note.title ||
+    note.body.split("\n")[0].trim().slice(0, 120) ||
+    "Nota anterior"
+  );
+}
+export function orderNotes(notes: Note[]) {
+  return [...notes].sort(
+    (a, b) =>
+      urgency[b.category] - urgency[a.category] ||
+      (b.noted_at ? Date.parse(b.noted_at) : 0) -
+        (a.noted_at ? Date.parse(a.noted_at) : 0) ||
+      a.id.localeCompare(b.id),
+  );
+}
 export type History = {
   id: string;
   workspace_id: string;
@@ -156,7 +193,6 @@ export function freshObject(
             attr("Utilizadores", "list", [], "teacher", "teacher"),
           ]
         : []),
-      attr("Notas compartilhadas", "list", [], "teacher", "teacher"),
     ],
   };
 }

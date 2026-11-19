@@ -3,6 +3,8 @@ import {
   type Room,
   type Workspace,
   type Note,
+  type NoteDraft,
+  type NoteVisibility,
   type History,
   type Member,
   canManageRoom,
@@ -13,7 +15,8 @@ export const DEMO_USER = "11111111-1111-4111-8111-111111111111";
 type Store = {
   workspaces: Workspace[];
   rooms: Room[];
-  notes: Note[];
+  structuredNotes?: boolean;
+  notes: (Note & { visibility?: NoteVisibility })[];
   history: History[];
 };
 const key = "vuxlab-demo-v1";
@@ -52,14 +55,68 @@ function seed(): Store {
         objects,
       },
     ],
-    notes: [],
+    structuredNotes: true,
+    notes: (
+      [
+        ["Sem mouse", "Separar um mouse de reposição.", "warning"],
+        [
+          "HD corrompido",
+          "Verificar o equipamento antes da próxima aula.",
+          "critical",
+        ],
+      ] as const
+    ).map(([title, body, category]) => ({
+      id: crypto.randomUUID(),
+      workspace_id,
+      room_id: id,
+      object_id: objects[2].id,
+      title,
+      body,
+      category,
+      author_id: DEMO_USER,
+      visibility: "shared",
+      author_name: "Conta demonstrativa",
+      noted_at: new Date().toISOString(),
+    })),
     history: [],
   };
 }
 function read(): Store {
   try {
     const raw = localStorage.getItem(key);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const state = JSON.parse(raw) as Store;
+      if (!state.structuredNotes) {
+        for (const room of state.rooms) {
+          for (const object of room.objects) {
+            const legacy = object.attributes.find(
+              (attr) => attr.name === "Notas compartilhadas",
+            );
+            if (!Array.isArray(legacy?.value)) continue;
+            for (const entry of legacy.value) {
+              const body =
+                typeof entry === "string" ? entry : JSON.stringify(entry);
+              if (body.trim())
+                state.notes.push({
+                  id: crypto.randomUUID(),
+                  workspace_id: room.workspace_id,
+                  room_id: room.id,
+                  object_id: object.id,
+                  title: "",
+                  body,
+                  category: "reminder",
+                  noted_at: null,
+                  author_id: null,
+                  visibility: "shared",
+                });
+            }
+          }
+        }
+        state.structuredNotes = true;
+        write(state);
+      }
+      return state;
+    }
   } catch {
     throw new Error("Não foi possível ler os dados demonstrativos locais");
   }
@@ -203,21 +260,43 @@ export const demo = {
     });
     write(s);
   },
-  async notes(w: string) {
-    return read().notes.filter(
-      (n) => n.workspace_id === w && n.author_id === DEMO_USER,
+  async notes(
+    visibility: NoteVisibility,
+    workspaceId?: string,
+  ): Promise<Note[]> {
+    const state = read();
+    return state.notes
+      .filter(
+        (note) =>
+          (note.visibility ?? "personal") === visibility &&
+          (!workspaceId || workspaceId === note.workspace_id),
+      )
+      .map((note) => ({
+        ...note,
+        title: note.title ?? "",
+        category: note.category ?? "reminder",
+        noted_at: note.noted_at ?? null,
+      }));
+  },
+  async saveNote(visibility: NoteVisibility, draft: NoteDraft, id?: string) {
+    const state = read();
+    const note = {
+      ...draft,
+      id: id || crypto.randomUUID(),
+      author_id: DEMO_USER,
+      author_name:
+        localStorage.getItem("vuxlab-demo-name") || "Conta demonstrativa",
+      visibility,
+    };
+    state.notes = state.notes.filter((x) => x.id !== note.id).concat(note);
+    write(state);
+  },
+  async deleteNote(visibility: NoteVisibility, id: string) {
+    const state = read();
+    state.notes = state.notes.filter(
+      (n) => n.id !== id || (n.visibility ?? "personal") !== visibility,
     );
-  },
-  async saveNote(n: Omit<Note, "id" | "author_id">, id?: string) {
-    const s = read();
-    const note = { ...n, id: id || crypto.randomUUID(), author_id: DEMO_USER };
-    s.notes = s.notes.filter((x) => x.id !== note.id).concat(note);
-    write(s);
-  },
-  async deleteNote(id: string) {
-    const s = read();
-    s.notes = s.notes.filter((n) => n.id !== id);
-    write(s);
+    write(state);
   },
   async members(): Promise<Member[]> {
     return [{ user_id: DEMO_USER, role: "admin" }];
