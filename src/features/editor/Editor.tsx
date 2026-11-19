@@ -1055,9 +1055,12 @@ export default function Editor({
               <Button
                 size="sm"
                 variant="outline"
+                className="cancel-move"
+                aria-label="Cancelar movimento"
                 onClick={() => setMove(false)}
               >
-                Cancelar movimento
+                <X size={15} className="cancel-move-icon" />
+                <span className="cancel-move-label">Cancelar movimento</span>
               </Button>
             )}
             <span className="row tiny muted canvas-hint">

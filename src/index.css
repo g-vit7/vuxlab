@@ -2841,3 +2841,59 @@ textarea {
 .editor-landscape .properties-actions .btn {
   min-height: 32px;
 }
+
+.cancel-move-icon {
+  display: none;
+}
+
+/* The map spans both columns, even when the details use the right column. */
+@media (min-width: 801px) and (hover: hover) {
+  .editor-layout {
+    grid-template-columns: minmax(0, 1fr) min(300px, 35%);
+  }
+  .editor-layout
+    > .canvas-section
+    > :is(.editor-toolbar, .canvas-scroll, .canvas-footer) {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+  .has-properties
+    .editor-layout
+    > .canvas-section
+    > :is(.editor-toolbar, .canvas-footer) {
+    grid-column: 1;
+  }
+  .editor-layout > .properties {
+    grid-area: 1 / 2 / -1 / 3;
+    justify-self: stretch;
+    margin: 0;
+    width: auto;
+    border-width: 0 0 0 1px;
+    border-radius: 0;
+    box-shadow: none;
+    z-index: 6;
+  }
+  .editor-toolbar,
+  .canvas-footer {
+    container: editor-bar / inline-size;
+  }
+  .canvas-footer {
+    height: 48px;
+    flex-wrap: nowrap;
+  }
+  .canvas-footer .zoom-tools {
+    flex-wrap: nowrap;
+  }
+  @container editor-bar (max-width: 460px) {
+    .editor-toolbar .hide-small,
+    .canvas-footer :is(.canvas-hint, .cancel-move-label) {
+      display: none;
+    }
+    .canvas-footer .cancel-move-icon {
+      display: initial;
+    }
+    .canvas-footer .zoom-tools {
+      margin-inline-start: auto;
+    }
+  }
+}
