@@ -2565,15 +2565,6 @@ textarea {
   right: 1px;
   cursor: nesw-resize;
 }
-.corner-1 span {
-  transform: rotate(90deg);
-}
-.corner-2 span {
-  transform: rotate(180deg);
-}
-.corner-3 span {
-  transform: rotate(270deg);
-}
 .canvas-footer {
   flex-wrap: wrap;
   justify-content: space-between;

@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -20,6 +21,7 @@ import {
   Crosshair,
   RotateCw,
   ArrowLeft,
+  ArrowDownRight,
   Download,
   History as HistoryIcon,
   Save,
@@ -63,7 +65,7 @@ import {
   type Note,
 } from "../../lib/model";
 import type { Api } from "../../lib/api";
-import { toView, fromView } from "./view";
+import { toView, fromView, clampZoom, pinchGeometry } from "./view";
 const mobileDetailsQuery =
   "(max-width: 800px), (hover: none) and (pointer: coarse)";
 const landscapeQuery =
@@ -183,6 +185,20 @@ export default function Editor({
     left: number;
     top: number;
     moved: boolean;
+  } | null>(null);
+  const touchPoints = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{
+    ids: [number, number];
+    distance: number;
+    zoom: number;
+    gridX: number;
+    gridY: number;
+  } | null>(null);
+  const pinchCamera = useRef<{
+    x: number;
+    y: number;
+    gridX: number;
+    gridY: number;
   } | null>(null);
   const skipClick = useRef(false);
   const resizeDrag = useRef<typeof size>(undefined);
@@ -411,8 +427,54 @@ export default function Editor({
     );
   }
 
+  function alignPinch(camera: NonNullable<typeof pinchCamera.current>) {
+    const rect = grid.current?.getBoundingClientRect();
+    if (!rect) return;
+    scroll.current?.scrollBy(
+      rect.left + camera.gridX * cell - camera.x,
+      rect.top + camera.gridY * cell - camera.y,
+    );
+  }
+
+  useLayoutEffect(() => {
+    const camera = pinchCamera.current;
+    pinchCamera.current = null;
+    if (camera) alignPinch(camera);
+  }, [zoom]);
+
+  function beginPinch() {
+    const [first, second] = touchPoints.current.entries();
+    const rect = grid.current?.getBoundingClientRect();
+    if (!first || !second || !rect) return;
+    const start = pinchGeometry(first[1], second[1]);
+    pinch.current = {
+      ids: [first[0], second[0]],
+      distance: start.distance,
+      zoom,
+      gridX: (start.x - rect.left) / cell,
+      gridY: (start.y - rect.top) / cell,
+    };
+    gesture.current = null;
+    skipClick.current = true;
+  }
+
+  function touchStart(event: PointerEvent<HTMLDivElement>) {
+    if (event.pointerType !== "touch") return;
+    touchPoints.current.set(event.pointerId, {
+      x: event.clientX,
+      y: event.clientY,
+    });
+    if (touchPoints.current.size < 2) return;
+    event.stopPropagation();
+    resizeDrag.current = undefined;
+    setSize(undefined);
+    if (!pinch.current) beginPinch();
+    for (const id of touchPoints.current.keys()) {
+      event.currentTarget.setPointerCapture(id);
+    }
+  }
+
   function startPan(event: PointerEvent<HTMLDivElement>) {
-    if (!event.isPrimary && event.pointerType === "touch") return;
     if (
       event.button !== 1 &&
       event.button !== 2 &&
@@ -435,6 +497,37 @@ export default function Editor({
   }
 
   function movePan(event: PointerEvent<HTMLDivElement>) {
+    if (touchPoints.current.has(event.pointerId)) {
+      touchPoints.current.set(event.pointerId, {
+        x: event.clientX,
+        y: event.clientY,
+      });
+    }
+    const activePinch = pinch.current;
+    if (activePinch && event.pointerType === "touch") {
+      const [first, second] = activePinch.ids.map((id) =>
+        touchPoints.current.get(id),
+      );
+      if (!first || !second) return;
+      const point = pinchGeometry(first, second);
+      const nextZoom = clampZoom(
+        (activePinch.zoom * point.distance) / activePinch.distance,
+      );
+      const camera = {
+        x: point.x,
+        y: point.y,
+        gridX: activePinch.gridX,
+        gridY: activePinch.gridY,
+      };
+      if (zoom === nextZoom) {
+        pinchCamera.current = null;
+        alignPinch(camera);
+      } else {
+        pinchCamera.current = camera;
+        setZoom(nextZoom);
+      }
+      return;
+    }
     const start = gesture.current;
     if (!start || start.id !== event.pointerId) return;
     const dx = event.clientX - start.x,
@@ -446,6 +539,39 @@ export default function Editor({
   }
 
   function endPan(event: PointerEvent<HTMLDivElement>) {
+    if (
+      event.type === "lostpointercapture" &&
+      event.target !== event.currentTarget
+    )
+      return;
+    if (event.pointerType === "touch")
+      touchPoints.current.delete(event.pointerId);
+    const activePinch = pinch.current;
+    if (activePinch && event.pointerType === "touch") {
+      if (!activePinch.ids.includes(event.pointerId)) return;
+      pinch.current = null;
+      if (touchPoints.current.size >= 2) {
+        beginPinch();
+      } else {
+        const [remaining] = touchPoints.current.entries();
+        if (remaining) {
+          const [id, point] = remaining;
+          gesture.current = {
+            id,
+            ...point,
+            left: event.currentTarget.scrollLeft,
+            top: event.currentTarget.scrollTop,
+            moved: true,
+          };
+        } else {
+          setPanning(false);
+          requestAnimationFrame(() => {
+            skipClick.current = false;
+          });
+        }
+      }
+      return;
+    }
     const start = gesture.current;
     if (!start || start.id !== event.pointerId) return;
     gesture.current = null;
@@ -880,10 +1006,12 @@ export default function Editor({
               }
             }}
             onContextMenu={(e) => e.preventDefault()}
+            onPointerDownCapture={touchStart}
             onPointerDown={startPan}
             onPointerMove={movePan}
             onPointerUp={endPan}
             onPointerCancel={endPan}
+            onLostPointerCapture={endPan}
             onAuxClick={(e) => e.preventDefault()}
             onClickCapture={(e) => {
               if (skipClick.current || (pan && e.detail > 0))
@@ -1084,7 +1212,11 @@ export default function Editor({
                                 );
                             }}
                           >
-                            <span aria-hidden="true">↘</span>
+                            <ArrowDownRight
+                              aria-hidden="true"
+                              size={14}
+                              style={{ transform: `rotate(${turn * 90}deg)` }}
+                            />
                           </button>
                         )}
                       </div>
@@ -1125,14 +1257,14 @@ export default function Editor({
             <div className="row zoom-tools">
               <button
                 aria-label="Diminuir zoom"
-                onClick={() => setZoom((z) => Math.max(0.5, z - 0.1))}
+                onClick={() => setZoom((z) => clampZoom(z - 0.1))}
               >
                 <Minus size={15} />
               </button>
               <span>{Math.round(zoom * 100)}%</span>
               <button
                 aria-label="Aumentar zoom"
-                onClick={() => setZoom((z) => Math.min(1.6, z + 0.1))}
+                onClick={() => setZoom((z) => clampZoom(z + 0.1))}
               >
                 <Plus size={15} />
               </button>

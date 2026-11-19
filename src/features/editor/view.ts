@@ -31,3 +31,15 @@ export function fromView(
     (4 - turn) % 4,
   );
 }
+
+export function clampZoom(zoom: number) {
+  return Math.max(0.5, Math.min(1.6, zoom));
+}
+
+export function pinchGeometry(a: Point, b: Point) {
+  return {
+    x: (a.x + b.x) / 2,
+    y: (a.y + b.y) / 2,
+    distance: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)),
+  };
+}
