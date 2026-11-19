@@ -2598,11 +2598,6 @@ textarea {
   .editor-heading .save-indicator {
     display: none;
   }
-  .editor-page:not(.editor-landscape) .properties {
-    align-self: end;
-    max-height: min(calc(100% - 16px), 65dvh, 550px);
-    width: min(100% - 24px, 400px);
-  }
 }
 .editor-fullscreen {
   z-index: 60;
@@ -2877,9 +2872,17 @@ textarea {
   .canvas-footer {
     container: editor-bar / inline-size;
   }
+  .editor-layout {
+    --editor-footer-height: 48px;
+  }
   .canvas-footer {
-    height: 48px;
+    height: var(--editor-footer-height);
     flex-wrap: nowrap;
+  }
+  .editor-layout .properties-actions {
+    height: var(--editor-footer-height);
+    padding: 4px 10px;
+    align-items: center;
   }
   .canvas-footer .zoom-tools {
     flex-wrap: nowrap;
@@ -2896,4 +2899,48 @@ textarea {
       margin-inline-start: auto;
     }
   }
+}
+
+/* Details replace the map visually on touch devices without unmounting it. */
+.editor-compact .editor-layout > .properties {
+  display: none;
+}
+.editor-mobile-details .editor-layout > .properties {
+  display: flex;
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  width: 100%;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
+  padding-block: env(safe-area-inset-top) env(safe-area-inset-bottom);
+}
+.shell:has(.editor-mobile-details) :is(.sidebar-navigation, .sidebar-backdrop) {
+  display: none;
+}
+.editor-mobile-details .properties-top {
+  padding: 6px 12px;
+  gap: 10px;
+}
+.editor-mobile-details .properties-top .btn {
+  min-height: 40px;
+  padding-inline: 5px;
+}
+.editor-mobile-details .properties-top h3 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.editor-mobile-details .properties-scroll {
+  scrollbar-gutter: auto;
+}
+.editor-mobile-details .properties-actions {
+  padding: 6px 12px;
+}
+.editor-mobile-details .properties-actions .btn {
+  min-height: 40px;
 }

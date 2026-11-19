@@ -64,6 +64,8 @@ import {
 } from "../../lib/model";
 import type { Api } from "../../lib/api";
 import { toView, fromView } from "./view";
+const mobileDetailsQuery =
+  "(max-width: 800px), (hover: none) and (pointer: coarse)";
 const landscapeQuery =
   "(orientation: landscape) and (max-height: 560px) and (hover: none)";
 const icons: Record<string, typeof Monitor> = {
@@ -152,10 +154,23 @@ export default function Editor({
     query.addEventListener("change", sync);
     return () => query.removeEventListener("change", sync);
   }, []);
+  const [mobileDetails, setMobileDetails] = useState(
+    () => matchMedia(mobileDetailsQuery).matches,
+  );
+  const [mobilePanelHidden, setMobilePanelHidden] = useState(false);
+  useEffect(() => {
+    const query = matchMedia(mobileDetailsQuery);
+    const sync = () => setMobileDetails(query.matches);
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
   const [pan, setPan] = useState(false);
   const [panning, setPanning] = useState(false);
   const [size, setSize] = useState<{ width: number; height: number }>();
   const scroll = useRef<HTMLDivElement>(null);
+  const detailsScroll = useRef<HTMLDivElement>(null);
+  const closeDetailsButton = useRef<HTMLButtonElement>(null);
+  const detailsWereOpen = useRef(false);
   const grid = useRef<HTMLDivElement>(null);
   const spaceHeld = useRef(false);
   const centerPending = useRef(false);
@@ -187,6 +202,27 @@ export default function Editor({
       (a) => a.name === "Notas compartilhadas",
     ),
     cell = Math.round(68 * zoom);
+  const hasProperties = !!object || panel === "notes" || panel === "room";
+  const mobileDetailsOpen =
+    mobileDetails && hasProperties && !move && !mobilePanelHidden;
+  useEffect(() => {
+    if (mobileDetailsOpen)
+      closeDetailsButton.current?.focus({ preventScroll: true });
+    else if (detailsWereOpen.current && mobileDetails)
+      scroll.current?.focus({ preventScroll: true });
+    detailsWereOpen.current = mobileDetailsOpen;
+  }, [mobileDetailsOpen, mobileDetails]);
+  useEffect(() => {
+    detailsScroll.current?.scrollTo(0, 0);
+  }, [panel, selected]);
+  function closeDetails() {
+    if (mobileDetails) {
+      setMobilePanelHidden(true);
+      return;
+    }
+    setSelected(undefined);
+    setPanel("attributes");
+  }
   const viewWidth = turn % 2 ? room.height : room.width;
   const viewHeight = turn % 2 ? room.width : room.height;
   const preview = size && object ? { ...object, ...size } : undefined;
@@ -582,6 +618,7 @@ export default function Editor({
       return;
     }
     if (occupied) {
+      setMobilePanelHidden(false);
       setSelected(occupied.id);
       setPanel("attributes");
       setNoteId(undefined);
@@ -595,6 +632,7 @@ export default function Editor({
         "Objeto adicionado",
         true,
       );
+      setMobilePanelHidden(false);
       setSelected(o.id);
       setPanel("attributes");
     } else {
@@ -626,9 +664,14 @@ export default function Editor({
   }
   return (
     <main
-      className={`editor-page ${fullscreen ? "editor-fullscreen" : ""} ${landscape ? "editor-landscape" : ""} ${object || panel === "notes" || panel === "room" ? "has-properties" : ""}`}
+      className={`editor-page ${fullscreen ? "editor-fullscreen" : ""} ${landscape ? "editor-landscape" : ""} ${hasProperties ? "has-properties" : ""} ${mobileDetails ? "editor-compact" : ""} ${mobileDetailsOpen ? "editor-mobile-details" : ""}`}
     >
-      <div className="editor-heading" role="region" aria-label="Ações da sala">
+      <div
+        className="editor-heading"
+        role="region"
+        aria-label="Ações da sala"
+        inert={mobileDetailsOpen}
+      >
         <div className="room-heading-title">
           <Link className="back-link" to={`/w/${w.id}`}>
             <ArrowLeft size={14} />
@@ -711,7 +754,7 @@ export default function Editor({
         </div>
       )}
       <div className="editor-layout">
-        <section className="canvas-section">
+        <section className="canvas-section" inert={mobileDetailsOpen}>
           <div className="editor-toolbar">
             <div className="tools">
               <button
@@ -776,9 +819,14 @@ export default function Editor({
                   variant="ghost"
                   title="Detalhes da sala"
                   aria-label="Detalhes da sala"
-                  onClick={() =>
-                    setPanel(panel === "attributes" ? "room" : "attributes")
-                  }
+                  onClick={() => {
+                    if (mobileDetails) {
+                      setMobilePanelHidden(false);
+                      setPanel("room");
+                    } else {
+                      setPanel(panel === "attributes" ? "room" : "attributes");
+                    }
+                  }}
                 >
                   <Settings size={16} />
                 </Button>
@@ -786,7 +834,10 @@ export default function Editor({
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => setPanel("notes")}
+                onClick={() => {
+                  setMobilePanelHidden(false);
+                  setPanel("notes");
+                }}
                 aria-label="Abrir notas particulares"
               >
                 <FileText size={16} />
@@ -1141,22 +1192,49 @@ export default function Editor({
           </footer>
         </section>
         <aside
-          className={`properties ${selected || panel === "notes" || panel === "room" ? "properties-open" : ""} ${move ? "moving-panel" : ""}`}
+          className={`properties ${hasProperties ? "properties-open" : ""} ${move ? "moving-panel" : ""}`}
+          role={mobileDetailsOpen ? "dialog" : undefined}
+          aria-modal={mobileDetailsOpen || undefined}
+          aria-labelledby="editor-properties-title"
+          onKeyDown={(event) => {
+            if (mobileDetailsOpen && event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              closeDetails();
+            }
+          }}
         >
           <div className="properties-top">
-            <h3>{object ? "Detalhes do objeto" : "Detalhes da sala"}</h3>
-            <Button
-              className="close-properties"
-              variant="ghost"
-              size="icon"
-              aria-label="Fechar painel"
-              onClick={() => {
-                setSelected(undefined);
-                setPanel("attributes");
-              }}
-            >
-              <X size={18} />
-            </Button>
+            {mobileDetailsOpen ? (
+              <>
+                <Button
+                  ref={closeDetailsButton}
+                  variant="ghost"
+                  size="sm"
+                  onClick={closeDetails}
+                >
+                  <ArrowLeft size={16} /> Voltar ao mapa
+                </Button>
+                <h3 id="editor-properties-title">
+                  {object ? identifier(object) : "Detalhes da sala"}
+                </h3>
+              </>
+            ) : (
+              <>
+                <h3 id="editor-properties-title">
+                  {object ? "Detalhes do objeto" : "Detalhes da sala"}
+                </h3>
+                <Button
+                  className="close-properties"
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Fechar painel"
+                  onClick={closeDetails}
+                >
+                  <X size={18} />
+                </Button>
+              </>
+            )}
           </div>
           {sharedNotes && (
             <Button
@@ -1189,7 +1267,7 @@ export default function Editor({
               Minhas notas
             </button>
           </div>
-          <div className="properties-scroll">
+          <div className="properties-scroll" ref={detailsScroll}>
             {panel !== "notes" ? (
               object ? (
                 <>
